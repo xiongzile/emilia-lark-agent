@@ -30,6 +30,7 @@ pnpm start
 ```
 
 Subscribe the app to `im.message.receive_v1` and grant only the permissions required by the operations you want the bot to perform.
+The default model is `deepseek-v4-flash`; override it with `DEEPSEEK_MODEL` if the installed `pi-ai` catalog exposes another model ID.
 
 ## Private extensions
 

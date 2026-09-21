@@ -14,10 +14,12 @@ export function createDeepSeekAgent() {
 
     models.setProvider(deepseekProvider());
 
-    const model = models.getModel(
-        "deepseek",
-        "deepseek-flash",
-    );
+    const modelId = process.env.DEEPSEEK_MODEL?.trim() || "deepseek-v4-flash";
+    const model = models.getModel("deepseek", modelId);
+    if (!model) {
+        const available = models.getModels("deepseek").map((item) => item.id).join(", ");
+        throw new Error(`Unknown DeepSeek model '${modelId}'. Available models: ${available}`);
+    }
 
     const configuredTools = createConfiguredCliTools(localAgentConfig.commandTools ?? []);
     const systemPrompt = [emiliaSystemPrompt, localAgentConfig.prompt]
