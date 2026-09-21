@@ -54,12 +54,6 @@ export class MemoryDistiller {
         this.timer.unref();
     }
 
-    async stop(): Promise<void> {
-        if (this.timer) clearTimeout(this.timer);
-        this.timer = undefined;
-        await this.running;
-    }
-
     async update(audit = false): Promise<string[]> {
         if (this.timer) clearTimeout(this.timer);
         this.timer = undefined;

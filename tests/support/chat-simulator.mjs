@@ -33,16 +33,10 @@ function matchesCall(call, expected) {
     return true;
 }
 
-async function checkExpect(expect, {reply, calls, store, workspaces, selection}) {
+async function checkExpect(expect, {reply, calls, store, workspaces}) {
     if (!expect) return;
     if (expect.reply) assert.match(reply, expect.reply);
     if (expect.notReply) assert.doesNotMatch(reply, expect.notReply);
-    if (expect.context) {
-        assert.equal(selection?.source, expect.context.source ?? "jev");
-        if (expect.context.mode) assert.equal(selection.mode, expect.context.mode);
-        for (const id of expect.context.includes ?? []) assert.ok(selection.messageIds.includes(id), `Context missing ${id}`);
-        for (const id of expect.context.excludes ?? []) assert.ok(!selection.messageIds.includes(id), `Unrelated context ${id}`);
-    }
 
     for (const expected of expect.calls ?? []) {
         const count = calls.filter((call) => matchesCall(call, expected)).length;
@@ -74,8 +68,8 @@ async function checkExpect(expect, {reply, calls, store, workspaces, selection})
     }
 }
 
-export function createChatSimulator({fixture, workspaces, MemoryStore, createDeepSeekAgent, AgentSession, createContextSelector, toolRegistry}) {
-    return async function play({history = [], tools = ["memory", "git"], events, contextUnavailable = false}) {
+export function createChatSimulator({fixture, workspaces, MemoryStore, createDeepSeekAgent, AgentSession, toolRegistry}) {
+    return async function play({history = [], tools = ["memory", "git"], events}) {
         const directory = await mkdtemp(join(fixture, "memory-"));
         if (history.length) {
             await writeFile(join(directory, "transcript.json"), JSON.stringify({
@@ -92,7 +86,6 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
         let store = await MemoryStore.open(directory);
         let session;
         let distiller;
-        let selection;
         const timeline = history.flatMap(({user, assistant, at}) => [
             {type: "user", text: user, at},
             {type: "assistant", text: assistant},
@@ -105,15 +98,7 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
             );
             const runtime = createDeepSeekAgent(store, resolvedTools);
             distiller = runtime.distiller;
-            const selectContext = createContextSelector(contextUnavailable ? {
-                apiKey: "fixture-key", enabled: true,
-                request: async () => { throw new Error("simulated selector outage"); },
-            } : undefined);
-            session = new AgentSession(runtime.agent, store, distiller, async (...args) => {
-                selection = await selectContext(...args);
-                timeline.push({type: "context", ...selection});
-                return selection;
-            });
+            session = new AgentSession(runtime.agent, store, distiller);
             runtime.agent.subscribe((event) => {
                 if (event.type === "tool_execution_start") {
                     calls.push({tool: event.toolName, args: event.args});
@@ -139,7 +124,6 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
                     const changes = await distiller.update();
                     timeline.push({type: "distill", changes});
                 } else if (event.restart) {
-                    await distiller.stop();
                     store = await MemoryStore.open(directory);
                     start();
                     timeline.push({type: "restart"});
@@ -154,13 +138,11 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
                 } else {
                     throw new Error(`Unknown conversation event: ${JSON.stringify(event)}`);
                 }
-                await checkExpect(event.expect, {reply, calls: calls.slice(before), store, workspaces, selection});
+                await checkExpect(event.expect, {reply, calls: calls.slice(before), store, workspaces});
             }
         } catch (error) {
             error.timeline = timeline;
             throw error;
-        } finally {
-            await distiller.stop();
         }
         return timeline;
     };

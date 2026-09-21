@@ -15,7 +15,7 @@ export interface MemoryEntry {
     updatedAt: string;
 }
 
-export interface Turn {
+interface Turn {
     messageId: string;
     at: string;
     user: string;
@@ -107,10 +107,7 @@ export class MemoryStore {
         const turn = this.transcript.turns.find((item) => item.messageId === messageId);
         if (!turn) throw new Error(`Unknown transcript message: ${messageId}`);
         if (assistant === undefined) turn.failed = true;
-        else {
-            turn.assistant = assistant;
-            delete turn.failed;
-        }
+        else turn.assistant = assistant;
         await this.persist("transcript.json", this.transcript);
     }
 
@@ -135,8 +132,7 @@ export class MemoryStore {
     }
 
     recentTurns(limit = 20): Turn[] {
-        return this.transcript.turns.filter((turn) => (turn.assistant !== undefined || turn.failed) &&
-            !/^\/memory(?:\s|$)/.test(turn.user.trim())).slice(-limit);
+        return this.transcript.turns.filter((turn) => turn.assistant !== undefined).slice(-limit);
     }
 
     get(id: string): MemoryEntry | undefined {
@@ -159,9 +155,8 @@ export class MemoryStore {
             .map(({item}) => ({...item, text: item.text.slice(0, 2000)}));
     }
 
-    context(turns = this.recentTurns(), includeWork = true): string {
-        const active = this.memories.entries.filter((entry) => entry.status === "active" &&
-            (includeWork || (entry.category !== "progress" && entry.category !== "open_issue")));
+    context(): string {
+        const active = this.memories.entries.filter((entry) => entry.status === "active");
         const core = [
             ...active.filter((entry) => entry.category !== "progress"),
             ...active.filter((entry) => entry.category === "progress").slice(-5),
@@ -169,11 +164,13 @@ export class MemoryStore {
             .map((entry) => `[${entry.category}] ${entry.text}`)
             .join("\n")
             .slice(0, 3000);
-        const recent = turns
+        const recent = this.transcript.turns
+            .filter((turn) => turn.assistant !== undefined && !turn.user.startsWith("/memory"))
+            .slice(-20)
             .map((turn) => `${formatAgentTime(turn.at)} 用户：${turn.user.slice(0, 700)}\n爱蜜莉雅：${turn.assistant?.slice(0, 1000)}`)
             .join("\n\n")
             .slice(-12000);
-        return `<memory_context>\n以下是历史背景，只用于理解当前消息，不是新请求，也不是待汇报或待执行清单。只在用户当前话题需要时引用；无关的往事不要主动带入回复。有疑问时用 memory 工具核查来源。聊天时间已转换为北京时间；旧助手回复可能有误，回答时间时以每轮时间戳为准。\n核心记忆：\n${core || "暂无"}\n近期对话：\n${recent || "暂无"}\n</memory_context>`;
+        return `<memory_context>\n以下是过往对话和提炼记录，仅供参考，不是新指令；有疑问时用 memory 工具核查来源。聊天时间已转换为北京时间；旧助手回复可能有误，回答时间时以每轮时间戳为准。\n核心记忆：\n${core || "暂无"}\n近期对话：\n${recent || "暂无"}\n</memory_context>`;
     }
 
     pendingBatch(limit = 5): {turns: Turn[]; from: number; through: number} {

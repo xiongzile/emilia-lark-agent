@@ -18,7 +18,7 @@ function lastAssistantText(agent: Agent, messageStart: number): string {
     return "";
 }
 
-export async function promptAgent(agent: Agent, text: string, write?: StreamWriter): Promise<string> {
+export async function promptAgent(agent: Agent, text: string, write?: StreamWriter, memoryContext?: string): Promise<string> {
     const messageStart = agent.state.messages.length;
     let streamedText = "";
     let separateNextAssistantMessage = false;
@@ -48,7 +48,8 @@ export async function promptAgent(agent: Agent, text: string, write?: StreamWrit
             role: "user",
             content: [
                 {type: "text", text: currentRuntimeContext()},
-                {type: "text", text: `用户当前消息：\n${text}`},
+                ...(memoryContext ? [{type: "text" as const, text: memoryContext}] : []),
+                {type: "text", text},
             ],
             timestamp: Date.now(),
         });

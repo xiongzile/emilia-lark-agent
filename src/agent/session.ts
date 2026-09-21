@@ -1,6 +1,5 @@
-import type {Agent, AgentMessage} from "@earendil-works/pi-agent-core";
-import {createContextSelector, contextFallback, type ContextSelector} from "./context-selector.ts";
-import {restoreTurn} from "./context.ts";
+import type {Agent} from "@earendil-works/pi-agent-core";
+import {advanceContext, needsContext, type ContextState} from "../channels/context-state.ts";
 import {MemoryDistiller} from "../memory/distill.ts";
 import {memoryCategories, type MemoryCategory, type MemoryStore} from "../memory/store.ts";
 import {promptAgent} from "./turn.ts";
@@ -49,22 +48,19 @@ async function memoryCommand(text: string, store: MemoryStore, distiller: Memory
 }
 
 export class AgentSession {
-    private readonly turnMessages = new Map<string, AgentMessage[]>();
+    private contextState: ContextState = {kind: "reload"};
     private readonly agent: Agent;
     private readonly store: MemoryStore;
     private readonly distiller: MemoryDistiller;
-    private readonly selectContext: ContextSelector;
 
     constructor(
         agent: Agent,
         store: MemoryStore,
         distiller: MemoryDistiller,
-        selectContext: ContextSelector = createContextSelector(),
     ) {
         this.agent = agent;
         this.store = store;
         this.distiller = distiller;
-        this.selectContext = selectContext;
     }
 
     async run(messageId: string, text: string, write?: (content: string) => Promise<void>): Promise<string> {
@@ -74,30 +70,12 @@ export class AgentSession {
             let reply: string;
             if (command) {
                 reply = await memoryCommand(text, this.store, this.distiller);
-                this.turnMessages.clear();
+                this.contextState = advanceContext(this.contextState, "command");
             } else {
-                const turns = this.store.recentTurns();
-                const selection = await this.selectContext(text, turns)
-                    .catch(() => contextFallback("selector_failed"));
-                console.log("[Context]", selection);
-                const system = this.agent.state.messages[0];
-                if (system?.role !== "system") throw new Error("Agent system message missing");
-                this.agent.state.messages = [
-                    {...system, sections: {
-                        ...system.sections,
-                        memory: this.store.context([], selection.mode === "task"),
-                        focus: selection.mode === "chat"
-                            ? "<conversation_focus>本轮是轻松聊天，像熟人一样自然接话。不主动询问有什么需要帮忙，不提出办理任务或汇报工作。</conversation_focus>"
-                            : null,
-                    }},
-                    ...turns.filter((turn) => selection.messageIds.includes(turn.messageId))
-                        .flatMap((turn) => this.turnMessages.get(turn.messageId) ?? restoreTurn(turn, this.agent.state.model)),
-                ];
-                const start = this.agent.state.messages.length;
-                reply = await promptAgent(this.agent, text, write);
-                this.turnMessages.set(messageId, this.agent.state.messages.slice(start));
-                const retained = new Set([...turns.slice(-19).map((turn) => turn.messageId), messageId]);
-                for (const id of this.turnMessages.keys()) if (!retained.has(id)) this.turnMessages.delete(id);
+                const reload = needsContext(this.contextState);
+                if (reload) this.agent.state.messages = this.agent.state.messages.slice(0, 1);
+                reply = await promptAgent(this.agent, text, write, reload ? this.store.context() : undefined);
+                this.contextState = advanceContext(this.contextState, "replied");
             }
             await this.store.recordAssistant(messageId, reply);
             if (!command) {
@@ -105,7 +83,7 @@ export class AgentSession {
             }
             return reply;
         } catch (error) {
-            this.turnMessages.delete(messageId);
+            this.contextState = advanceContext(this.contextState, "failed");
             await this.store.recordAssistant(messageId, undefined).catch(console.error);
             throw error;
         }

@@ -18,16 +18,11 @@ the configured `DEEPSEEK_MODEL`. They run serially in separate Node processes,
 each with fresh temporary Git repositories, config, and memory. Each case has a
 five-minute timeout. Reports under `.private/test-runs/` keep the dialogue,
 tool calls, results, and assertion failure. Reports and credentials stay local.
-Cases marked `requiresJev` need `JEV_API_KEY` (or `TYPESAFE_API_KEY`) and enabled
-context selection; otherwise Node reports an explicit skip. With the key set,
-conversations use the production selector except the explicit outage scenario, which injects a failed transport. Run the remaining features with
-`AGENT_CONTEXT_SELECTION=off pnpm eval:agent` to check operation without Jev.
 
 ## Feature map
 
 | Cases | Implemented behavior |
 | --- | --- |
-| `scenarios/conversation/` | `src/agent/context-selector.ts`, `session.ts` and the persona: exclude unrelated work, preserve references and thanks, resume after restart, handle mixed greetings/requests, and retrieve history during a selector outage. |
 | `scenarios/memory/archived-time` | `src/time.ts` and `src/memory/store.ts`: archived timestamps override an earlier incorrect assistant answer. |
 | `scenarios/memory/remember-profile` | Memory extraction, JSON persistence, and `AgentSession` context restore a responsibility after restart. |
 | `scenarios/memory/ignore-small-talk` | The distiller avoids turning casual conversation into durable memory. |
@@ -36,15 +31,13 @@ conversations use the production selector except the explicit outage scenario, w
 | `scenarios/task-execution/` | `src/prompts/emilia.ts`: act on a confirmed request, respect the requested identity, report permission denial, and clarify missing information. External CLI responses are simulated. |
 | `scenarios/workspace/correct-file-target` | User correction redirects `workspace_files`; assertions inspect both repositories' actual files. |
 | `scenarios/workspace/find-source-symbol` | The model calls `configured-cli` and the real C++ search binary to locate a source definition. |
-| `memory.test.mjs` | Offline storage, source provenance and timestamp rendering. |
-| `context-selector.test.mjs` | HTTP errors, malformed responses, timeouts, uncertain references and operation without a key. |
-| `session-context.test.mjs` | Topic switches preserve paired tool evidence; restart restores wording; failures do not poison the next message. |
+| `memory.test.mjs`, `context-state.test.mjs` | Offline checks for storage, source provenance, timestamp rendering, and context refresh. |
 | `message-flow.test.mjs` | Offline message queuing, failed generation recovery, and streaming-card fallback. |
 | `native-search.test.mjs` | Offline search results, private-path exclusions, traversal rejection, and named workspace selection. |
 
 ## Add a conversation
 
-Use `conversation({name, history, tools, files, events, requiresJev, contextUnavailable})` from
+Use `conversation({name, history, tools, files, events})` from
 `support/agent-fixture.mjs`. Only `name` and `events` are required. `history`
 seeds prior dialogue; `files` seeds temporary workspace files; `tools` selects
 real local tools (`memory`, `git`, `files`, `search`) or explicit mock commands.
@@ -54,9 +47,6 @@ triggers `distill`, simulates `restart`, or ages out recent dialogue with
 `ageRecentTurns`. Its `expect` checks the reply, tool calls, saved memory, or
 actual files. Check mutations with exact arguments and `count: 1`; a fluent
 success message alone is not evidence of execution. Unknown mock commands fail.
-`expect.context` checks `mode`, `source` and message IDs to `includes`/`excludes`.
-Use it alongside reply/tool checks: correct classification alone does not prove
-a good conversation. `contextUnavailable: true` simulates a selector network failure while keeping the real main model and memory retrieval. Read the saved replies as well as the assertion result.
 
 Read [remember-profile](scenarios/memory/remember-profile.test.mjs) for a short
 conversation and [confirmed-cancellation](scenarios/task-execution/confirmed-cancellation.test.mjs)
