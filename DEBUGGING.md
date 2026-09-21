@@ -1,12 +1,15 @@
 # 本地调试
 
-本项目使用 pnpm，并从公开包仓库安装 agent runtime 依赖。
+本项目使用 pnpm，并把 Pi 源码固定在仓库的 `vendor/pi` submodule。Agent
+直接依赖其中的 `packages/agent` 和 `packages/ai`。
 
 准备与重新构建：
 
 ```sh
 cp .env.example .env
 # 编辑 .env，填写 FEISHU_APP_ID、FEISHU_APP_SECRET 和 DEEPSEEK_API_KEY
+git submodule update --init --recursive
+pnpm build:pi
 pnpm install
 pnpm build
 ```
@@ -38,10 +41,28 @@ pnpm service:uninstall
 安装脚本会记录当前 Node 绝对路径和 PATH，因此不依赖 `launchd` 的精简默认环境。
 升级或切换 Node 后重新执行一次 `pnpm service:install`。
 
-调试依赖源码时，可在 IDE 中打开 `node_modules` 里 source map 指向的源码；不要只在
-`.d.ts` 的方法声明上下断点。
+## 调试仓库内的 Pi 源码
 
-命令行调试入口为 `pnpm debug:agent`，它会在启动时暂停，等待调试器连接到 9229。
+`vendor/pi` 是公开 Pi 仓库的 submodule；`package.json` 的两个 Pi 依赖直接
+链接到它。团队成员和 CI 通过 submodule 指针使用同一个提交。首次 clone 后运行
+`git submodule update --init --recursive`，修改 Pi 源码后运行 `pnpm build:pi`，
+再重启调试进程。
+
+在当前工程的 JetBrains IDE 中使用 `Debug Local Pi` 运行配置点击 **Debug**。
+它的入口是本工程的 `src/index.ts`，工作目录是工程根目录，Node 参数包含
+`--env-file-if-exists=.env --enable-source-maps`。点击 Debug 时 IDE 会连接 Node
+调试器；命令行入口 `pnpm debug:agent` 则会在启动时暂停并等待连接到 9229。
+本地 `.env` 必须提供运行所需的飞书和 DeepSeek 凭据。
+如果后台 `launchd` 服务仍在运行，调试前执行 `pnpm service:uninstall`，避免两个
+进程同时监听同一个飞书应用；调试结束后可用 `pnpm service:install` 恢复。
+
+要在 Pi 中下断点，打开 `vendor/pi/packages/agent/src/agent.ts`，在
+`Agent.prompt()` 实现处下断点；DeepSeek 适配器位于
+`vendor/pi/packages/ai/src/providers/deepseek.ts`。运行时的 JavaScript source map
+会映射回这些源码。若修改了 Pi 源码，执行 `pnpm build:pi` 后重启 IDE 调试进程。
+
+推进 Pi 版本时执行 `git submodule update --remote vendor/pi`，重新安装和构建并
+检查兼容性，再提交更新后的 submodule 指针。Pi 的 `main` 更新不会自动进入本工程。
 
 ## 目录
 

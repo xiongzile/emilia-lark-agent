@@ -10,6 +10,7 @@ dist/
 tmp/
 out-tsc/
 logs/
+.local/
 
 # Package manager logs
 npm-debug.log*

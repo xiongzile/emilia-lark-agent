@@ -15,6 +15,7 @@ A self-hosted Lark/Feishu bot that streams DeepSeek responses into interactive c
 
 - Node.js with native TypeScript stripping support
 - pnpm 10
+- Git submodules initialized (`git clone --recurse-submodules` or `git submodule update --init --recursive`)
 - A Lark/Feishu custom app with long-connection event delivery enabled
 - A DeepSeek API key
 - `lark-cli` if the agent should operate Lark resources
@@ -24,13 +25,17 @@ A self-hosted Lark/Feishu bot that streams DeepSeek responses into interactive c
 ```sh
 cp .env.example .env
 # Fill in FEISHU_APP_ID, FEISHU_APP_SECRET, and DEEPSEEK_API_KEY.
+git submodule update --init --recursive
+pnpm build:pi
 pnpm install
 pnpm build
 pnpm start
 ```
 
 Subscribe the app to `im.message.receive_v1` and grant only the permissions required by the operations you want the bot to perform.
-The default model is `deepseek-v4-flash`; override it with `DEEPSEEK_MODEL` if the installed `pi-ai` catalog exposes another model ID.
+The default model is `deepseek-flash`; override it with `DEEPSEEK_MODEL` if the pinned Pi catalog exposes another model ID.
+
+Pi source is pinned as the `vendor/pi` submodule. The two Pi dependencies link to that source, so edits under `vendor/pi/packages/agent` or `vendor/pi/packages/ai` can be rebuilt with `pnpm build:pi` and debugged in place. To update Pi, run `git submodule update --remote vendor/pi`, rebuild and verify the agent, then commit the new submodule pointer. An update to the upstream `main` branch does not silently change an existing checkout.
 
 ## Private extensions
 

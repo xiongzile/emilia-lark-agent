@@ -14,7 +14,7 @@ export function createDeepSeekAgent() {
 
     models.setProvider(deepseekProvider());
 
-    const modelId = process.env.DEEPSEEK_MODEL?.trim() || "deepseek-v4-flash";
+    const modelId = process.env.DEEPSEEK_MODEL?.trim() || "deepseek-flash";
     const model = models.getModel("deepseek", modelId);
     if (!model) {
         const available = models.getModels("deepseek").map((item) => item.id).join(", ");

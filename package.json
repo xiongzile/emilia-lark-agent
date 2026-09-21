@@ -7,6 +7,7 @@
   "packageManager": "pnpm@10.17.1",
   "scripts": {
     "build": "tsc",
+    "build:pi": "node scripts/build-pi.mjs",
     "audit:public": "node scripts/check-public.mjs",
     "debug:agent": "node --env-file-if-exists=.env --inspect-brk --enable-source-maps src/index.ts",
     "start": "node --env-file-if-exists=.env --enable-source-maps src/index.ts",
@@ -15,8 +16,8 @@
     "service:uninstall": "zsh scripts/uninstall-launch-agent.sh"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.85.1",
-    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-agent-core": "link:vendor/pi/packages/agent",
+    "@earendil-works/pi-ai": "link:vendor/pi/packages/ai",
     "@larksuiteoapi/node-sdk": "^1.74.0"
   },
   "devDependencies": {
