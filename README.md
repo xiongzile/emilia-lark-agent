@@ -4,12 +4,16 @@ A self-hosted Lark/Feishu bot that streams DeepSeek responses into interactive c
 
 ## Features
 
-- Receives messages through the Lark long connection, so no public webhook is required.
-- Streams intermediate model output into an interactive card.
-- Exposes constrained file and Git tools for explicitly configured workspaces.
-- Supports user and bot identities through `lark-cli`.
-- Loads private workspaces, prompt instructions, and extra command-line tools from an ignored local config.
+- Receives text messages in direct chats and group mentions over the Lark long connection; no public webhook is required.
+- Acknowledges messages with a typing reaction, streams DeepSeek output into an interactive card, and falls back to a regular reply if streaming is unavailable.
+- Gives the agent the current date, time, and time zone for each turn, and logs model token/cache usage.
+- Runs `lark-cli` as a tool for Lark operations available to the configured user or bot identity and its permissions.
+- Lists, reads, and writes UTF-8 files inside named workspaces, and runs an allowlisted set of Git commands there. Destructive Git commands and force pushes are disabled.
+- Loads private workspaces, prompt instructions, and additional constrained command-line tools from an ignored local config.
+- Optionally searches the public web through Tavily, returning up to five short excerpts with source URLs when `TAVILY_API_KEY` is configured.
 - Includes a macOS `launchd` service with automatic restart and `caffeinate -i` support.
+
+This is still a single-process demo: one in-memory Agent handles messages sequentially, shares its conversation across chats, and loses that conversation when restarted. Only text messages are handled. Web search returns excerpts rather than full-page verification.
 
 ## Requirements
 
@@ -19,6 +23,7 @@ A self-hosted Lark/Feishu bot that streams DeepSeek responses into interactive c
 - A Lark/Feishu custom app with long-connection event delivery enabled
 - A DeepSeek API key
 - `lark-cli` if the agent should operate Lark resources
+- A Tavily API key if the agent should search the public web
 
 ## Setup
 
@@ -34,6 +39,7 @@ pnpm start
 
 Subscribe the app to `im.message.receive_v1` and grant only the permissions required by the operations you want the bot to perform.
 The default model is `deepseek-flash`; override it with `DEEPSEEK_MODEL` if the pinned Pi catalog exposes another model ID.
+Set `TAVILY_API_KEY` in the ignored `.env` to enable the `web_search` tool. Search queries are sent to Tavily; keep private documents and internal code out of them. The tool returns up to five short excerpts and URLs for attribution. Without the key, the agent continues to run without web search.
 
 Pi source is pinned as the `vendor/pi` submodule. The two Pi dependencies link to that source, so edits under `vendor/pi/packages/agent` or `vendor/pi/packages/ai` can be rebuilt with `pnpm build:pi` and debugged in place. To update Pi, run `git submodule update --remote vendor/pi`, rebuild and verify the agent, then commit the new submodule pointer. An update to the upstream `main` branch does not silently change an existing checkout.
 

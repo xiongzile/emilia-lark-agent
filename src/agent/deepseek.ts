@@ -6,6 +6,7 @@ import {larkCliTool} from "../tools/lark-cli.ts";
 import {workspaceFilesTool} from "../tools/workspace-files.ts";
 import {workspaceGitTool} from "../tools/workspace-git.ts";
 import {createConfiguredCliTools} from "../tools/configured-cli.ts";
+import {createWebSearchTool} from "../tools/web-search.ts";
 import {localAgentConfig} from "../config/local.ts";
 import {emiliaSystemPrompt} from "../prompts/emilia.ts";
 
@@ -22,6 +23,7 @@ export function createDeepSeekAgent() {
     }
 
     const configuredTools = createConfiguredCliTools(localAgentConfig.commandTools ?? []);
+    const webSearchTool = createWebSearchTool();
     const systemPrompt = [emiliaSystemPrompt, localAgentConfig.prompt]
         .filter(Boolean)
         .join("\n\n");
@@ -34,6 +36,7 @@ export function createDeepSeekAgent() {
                 larkCliTool,
                 workspaceFilesTool,
                 workspaceGitTool,
+                ...(webSearchTool ? [webSearchTool] : []),
                 ...configuredTools,
             ],
         },
