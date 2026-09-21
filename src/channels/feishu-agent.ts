@@ -1,4 +1,5 @@
-import {AgentSession, isMemoryCommand} from "../agent/session.ts";
+import type {AgentSession} from "../agent/session.ts";
+import {isMemoryCommand} from "../memory/commands.ts";
 import type {FeishuTextMessage, FeishuStreamWriter} from "./feishu.ts";
 
 export interface FeishuTransport {

@@ -6,7 +6,6 @@ export interface ConversationState {
     segmentStart?: string;
     currentTopic?: TopicReference;
     taskContext?: TopicReference;
-    lastMode?: ConversationMode;
 }
 export interface TurnRoute {
     mode: ConversationMode;
@@ -135,7 +134,7 @@ export function startsNewSegment(route: TurnRoute): boolean {
 
 // Move the context boundary without deleting the archive or the saved task.
 export function advanceConversation(state: ConversationState, route: TurnRoute, messageId: string): ConversationState {
-    const next = {...state, lastMode: route.mode};
+    const next = {...state};
     if (startsNewSegment(route)) next.segmentStart = messageId;
     if (route.mode === "greet") return next;
     if (route.source !== "jev") return next;

@@ -1,7 +1,6 @@
 import {createTurnRouter} from "./conversation.ts";
 import {Agent, type AgentTool} from "@earendil-works/pi-agent-core";
 import {createModels} from "@earendil-works/pi-ai";
-// @ts-ignore
 import {deepseekProvider} from "@earendil-works/pi-ai/providers/deepseek";
 import {larkCliTool} from "../tools/lark-cli.ts";
 import {workspaceFilesTool} from "../tools/workspace-files.ts";

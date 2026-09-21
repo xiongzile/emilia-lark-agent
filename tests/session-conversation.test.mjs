@@ -8,7 +8,7 @@ import {MemoryStore} from "../dist/memory/store.js";
 import {uncertainTurn, advanceConversation} from "../dist/agent/conversation.js";
 
 // Session orchestration: preserve actual tool evidence, not an invented summary.
-test("暂停、窗口过期和重启不丢任务来源，存活会话保留完整工具结果", async () => {
+test("查看记忆状态、暂停和重启不丢任务来源，存活会话保留完整工具结果", async () => {
     const directory = await mkdtemp(join(tmpdir(), "emilia-session-"));
     try {
         let store = await MemoryStore.open(directory);
@@ -30,6 +30,8 @@ test("暂停、窗口过期和重启不丢任务来源，存活会话保留完�
             : {...uncertainTurn(), source: "jev", mode: "task", topic: "文档", history: text === "查文档" ? "new" : "recall"};
         let session = new AgentSession(agent, store, {schedule() {}}, router);
         await session.run("work", "查文档");
+        await session.run("memory-status", "/memory status");
+        assert.equal(requests.length, 1, "查看记忆状态不调用模型，也不应丢弃刚查到的工具结果");
         await session.run("hello", "你好");
         assert.doesNotMatch(JSON.stringify(requests.at(-1)), /DOC-731|查文档/);
         for (let i = 0; i < 8; i++) {await store.recordUser(`chat-${i}`, "闲聊"); await store.recordAssistant(`chat-${i}`, "好呀");}
@@ -129,7 +131,7 @@ test("带称呼的问候建立持久边界，重启和路由故障都不会把�
         await store.recordUser("old", "昨天讨论 Jev，并取消 DEMO-482 的 35 条认领。");
         await store.recordAssistant("old", "处理完成。");
         await store.apply([{operation: "upsert", category: "project", text: "Jev 项目 DEMO-482", sourceMessageIds: ["old"]}], 1);
-        assert.match(store.context(), /Jev 项目 DEMO-482/);
+        assert.match(store.context("stable"), /Jev 项目 DEMO-482/);
         const requests = [];
         const agent = {
             state: {model: {api: "test", provider: "test", id: "test"}, messages: [{role: "system", content: "persona"}]},

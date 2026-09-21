@@ -5,6 +5,7 @@ import {join} from "node:path";
 import {test} from "node:test";
 import {MemoryStore} from "../dist/memory/store.js";
 import {MemoryDistiller} from "../dist/memory/distill.js";
+import {restoreTurn} from "../dist/agent/history.js";
 import {AgentSession} from "../dist/agent/session.js";
 
 test("raw turns survive restart and only distilled facts enter core memory", async () => {
@@ -31,8 +32,8 @@ test("raw turns survive restart and only distilled facts enter core memory", asy
         const report = await distiller.update();
         assert.equal(report.length, 1);
         assert.equal(store.status().pending, 0);
-        assert.match(store.context(), /pi 指用户的 agent 工程/);
-        assert.match(store.context(), /记住：pi 是我的 agent 工程/);
+        assert.match(store.context("stable"), /pi 指用户的 agent 工程/);
+        assert.doesNotMatch(store.context("stable"), /记住：pi 是我的 agent 工程/);
 
         const reopened = await MemoryStore.open(directory);
         assert.equal(reopened.list("project").length, 1);
@@ -56,7 +57,8 @@ test("historical chat times are shown in Beijing time while the archive stays UT
             version: 1, processedCount: 1, updatedAt: "2026-09-21T11:06:46.278Z", entries: [],
         }));
         const store = await MemoryStore.open(directory);
-        assert.match(store.context(), /2026-09-21T18:28:54\+08:00 用户：R8/);
+        assert.match(restoreTurn(store.turnsById(["history-1"])[0], {})[0].content,
+            /历史消息时间：2026-09-21T18:28:54\+08:00/);
         assert.equal(store.search("R8", true)[0].at, "2026-09-21T18:28:54+08:00");
 
         const session = new AgentSession(null, store, null);

@@ -1,7 +1,7 @@
 import {realpathSync} from "node:fs";
 import {localAgentConfig} from "./local.ts";
 
-export const workspaceRoots: Record<string, string> = {
+const workspaceRoots: Record<string, string> = {
     agent: realpathSync(process.cwd()),
     ...localAgentConfig.workspaces,
 };

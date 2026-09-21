@@ -39,8 +39,8 @@ results, and assertion failures. Reports and credentials stay local.
 | `scenarios/workspace/correct-file-target` | User correction redirects `workspace_files`; assertions inspect both repositories' actual files. |
 | `scenarios/workspace/find-source-symbol` | The model calls `configured-cli` and the real C++ search binary to locate a source definition. |
 | `jev-router.test.mjs` | Offline provider errors, rate limits, timeout, malformed or uncertain answers, independent decisions and request boundaries. |
-| `memory.test.mjs` | Offline checks for storage, source provenance and timestamp rendering. |
-| `conversation.test.mjs`, `session-conversation.test.mjs` | Current-segment continuity, durable topic boundaries, ten complete classifier exchanges, old-context exclusion from new-chat responses, memory scope, and paired tool results while live. |
+| `memory.test.mjs` | Offline checks for storage, source provenance, archive timestamp rendering and `/memory` command replies. |
+| `conversation.test.mjs`, `session-conversation.test.mjs` | Current-segment continuity, durable topic boundaries, ten complete classifier exchanges, old-context exclusion from new-chat responses, memory scope, and live tool evidence surviving `/memory status`. |
 | `message-flow.test.mjs` | Offline message queuing, failed generation recovery, and streaming-card fallback. |
 | `native-search.test.mjs` | Offline search results, private-path exclusions, traversal rejection, and named workspace selection. |
 

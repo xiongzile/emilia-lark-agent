@@ -1,5 +1,42 @@
 # Conversation modes and topic boundaries
 
+## Where a chat turn runs
+
+```mermaid
+flowchart TD
+    L[Feishu text event] --> Q[Serial message queue]
+    Q --> S[AgentSession: archive user message]
+    S --> C[Memory command]
+    S --> R[Jev: mode and history relation]
+    R --> H[Select transcript sources and core memory]
+    H --> P[Pi + DeepSeek]
+    P <--> T[Tools]
+    P -->|Text updates| F[Feishu reply or streaming card]
+    P --> A[Save final wording and conversation state]
+    C --> A
+    A --> F
+    A --> M[Schedule memory distillation for ordinary turns]
+```
+
+`channels/feishu.ts` owns the connection and reply transport;
+`channels/feishu-agent.ts` serializes incoming messages and handles card fallback.
+`agent/session.ts` orchestrates one turn. `/memory` commands live in
+`memory/commands.ts` and bypass turn classification and the main agent; update and
+forget can wait for the memory distiller. They preserve live tool results.
+
+`agent/conversation.ts` classifies and selects context; it does not execute work.
+`agent/deepseek.ts` registers the model and tools, while Pi runs the model/tool loop.
+`agent/turn.ts` forwards text updates to the card and extracts the final reply.
+There is one agent and one serialized session. The three modes below select what
+it sees, not separate agent instances.
+
+`memory/store.ts` keeps two ignored JSON files: the original transcript plus topic
+boundaries/references, and distilled memory entries. Core-memory rendering includes
+only selected facts. Transcript messages are assembled separately by the session;
+`agent/history.ts` restores archived wording after restart, with timestamps and an
+unverified label for old assistant claims. Live paired tool calls/results stay in
+the session's in-memory cache. They are not persisted as verified tool evidence.
+
 The first router (`1ad0689`) omitted history for one exact greeting, then brought
 all six recent exchanges back on the next message. An addressed greeting could
 also miss the rule. That made “晚上好呀爱蜜莉雅” / “今天过得怎么样” pick up old
@@ -130,7 +167,21 @@ Reliable resolution of an unnamed task beyond the ten-turn window is not a targe
 of this revision. Existing named-task references remain available without adding a
 new retrieval layer or another classifier.
 
-## Topic-boundary and ten-turn validation
+## Cleanup validation
+
+Unused transcript rendering inside the memory block, the `before` history option,
+write-only `lastMode` bookkeeping and an obsolete type-check suppression were
+removed. `/memory` commands now have their own module and no longer clear live
+tool evidence. The session regression failed before that cache fix and passed after it.
+
+Offline checks passed **33/33**. Real-model classification passed **40/40**, and
+conversations passed **29/33**: three greeting questions and one unnecessary read
+of a second repository remain failures. No assertion was relaxed. Both production
+memory scopes were also compared against `ba99235`; their rendered contents are
+byte-identical across every memory category/status. Local reports are
+`.private/test-runs/cleanup-offline.log` and `cleanup-model-eval.log`.
+
+## Topic-boundary and ten-turn validation (`ba99235`)
 
 The repeated baseline investigation on `ff9a091` found old-work leakage in 8/10
 casual-after-work runs despite correct routing. A paired context ablation removed

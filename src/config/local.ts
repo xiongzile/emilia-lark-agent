@@ -16,10 +16,9 @@ export interface CommandToolConfig {
     maxOutputBytes?: number;
 }
 
-export interface LocalAgentConfig {
+interface LocalAgentConfig {
     workspaces?: Record<string, string>;
     prompt?: string;
-    promptFiles?: string[];
     commandTools?: CommandToolConfig[];
 }
 
