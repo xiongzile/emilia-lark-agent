@@ -1,109 +1,122 @@
-# Conversation routing experiment
+# Conversation modes and greeting boundaries
 
-Status: accepted for this single-user assistant after comparing
-`experiment/conversation-routing` against rollback commit `a5fd1f3`. Acceptance
-requires improved conversation quality and no observed regression in continuity,
-correct tool targets, single execution, authorization handling or persistence.
-Occasional unsolicited references in casual replies remain a measured quality
-limitation, not a claim of zero risk or perfect behavior. Validation ran in isolated
-worktrees before changing the live service.
+The first router (`1ad0689`) omitted history for one exact greeting, then brought
+all six recent exchanges back on the next message. An addressed greeting could
+also miss the rule. That made “晚上好呀爱蜜莉雅” / “今天过得怎么样” pick up old
+Jev discussions and comments about testing the assistant.
 
-## Runtime behavior
+The current design treats a greeting as a durable boundary in the conversation,
+not a one-turn instruction to ignore history.
 
-`AgentSession` loads a small persisted `ConversationState`, routes the current
-message, assembles context, runs the normal Pi tool loop, then saves the reply and
-updated state together. Routing does not execute tools or add approval gates.
+## Modes
 
-- **Recent dialogue:** six exchanges, retaining complete live tool-call/result
-  groups. A model-produced route cannot remove these exchanges. Only a whole
-  standalone greeting/farewell matched by a small rule omits history for that turn.
-  A greeting embedded in a request does not match. Thanks retain recent context.
-- **Conversation state:** current topic, most recent task context and last turn
-  type. Topic/task entries contain a short label and up to four source message IDs
-  (first exchange plus the latest three), not a generated account of completed
-  work. Social turns preserve these references. Returning to a task retrieves its
-  original wording even after the recent window expires or the process restarts.
-- **Long-term memory:** stable profile, preferences, project facts and decisions
-  remain in core context. Progress and open issues are retrieved with the existing
-  memory tool instead of being inserted as an automatic work agenda.
+| Mode | Meaning | Context behavior |
+| --- | --- | --- |
+| `greet` | A standalone greeting or farewell, including names and particles | No prior exchanges; a brief greeting without opening another topic. Starts a fresh segment. |
+| `chat` | Casual conversation, feelings, knowledge questions, technical discussion | Recent dialogue in the current segment and its topic references. |
+| `task` | A request to query or act through tools, including supplying task parameters | Recent dialogue and applicable task references. |
 
-The router returns `NEW_TOPIC`, `CONTINUE_TOPIC`, `FOLLOW_UP`, `SOCIAL`, `META`, or
-`AMBIGUOUS`, plus a task-continuation hint. Nontrivial messages use the existing
-configured DeepSeek model with a small JSON-only request; there is no Jev call,
-new provider key, vector database or second post-response summarization call.
-Timeouts (three seconds), invalid output and request errors fall back to recent
-history and saved references. Long inputs bypass classification without truncating
-the user's actual message.
+An independent `history` field distinguishes `new`, `current` and `recall`.
+Mentioning or returning to earlier discussion permits `recall`; the existence of
+an old task does not. A greeting embedded in a substantive request is classified
+by that request. Thanks acknowledge the current exchange without resetting it.
+The modes select context and response guidance, not tool permissions or approval
+rules. All work still runs through the existing Pi tool loop.
 
-State is an optional `conversation` field in `.private/memory/transcript.json`;
-existing version-1 files remain readable. Archived assistant wording is labeled
-as historical, unverified wording. Restart restores wording, not invented tool
-execution evidence. Failed generations preserve the user's request with an
-unknown-outcome marker and exclude partial replies.
+## Request flow
 
-This is one current topic and one most-recent task context, not a multi-task
-scheduler. A task reference does not claim the task is still pending or completed.
-References retained by a mistaken route can still be unhelpful; retaining recent
-history prevents the earlier hard-deletion failure, not all model errors.
+1. Archive the user's message and load `ConversationState`.
+2. Fetch up to six exchanges starting at `segmentStart`.
+3. Route using the current message, the last three of those exchanges, and topic
+   names belonging to this segment. Archived task names are excluded even from
+   the classifier, so they cannot turn an ordinary acknowledgement into approval.
+4. Assemble the main model's context. Only `recall` adds the six exchanges before
+   the boundary and saved topic/task sources. A greeting itself gets no exchanges
+   and no current-time block. Ordinary chat after a greeting does not receive old
+   project/decision memory automatically; profile and preferences remain available.
+5. Run Pi with per-turn system guidance. The user's actual request takes precedence
+   if classification was mistaken. Reply through the existing streaming path.
+6. Save the final reply and updated state together. A greeting moves `segmentStart`
+   to its message ID. Each topic/task reference records which segment activated it.
 
-## Evaluation
+The archive is never deleted by a greeting. Explicit recall can bring the old
+sources into the new segment; later follow-ups can then use them. Current-segment
+exchanges remain available even if a normal chat/task classification is wrong.
+A router error, invalid JSON, or three-second timeout preserves the current
+segment and its active references, without reviving archived context.
 
-All runs used real `deepseek-flash` inference. External writes and web responses
-were simulated; Git and local-file checks used disposable workspaces. No Feishu
-messages or external platform writes were performed. The baseline had the same
-scenario files and search schema; only fixture cleanup and test-schema export
-were backported, without changing its conversation logic. The baseline has no
-router dependency; in the outage scenario it simply uses its normal path.
+State is an optional field in `.private/memory/transcript.json`. Existing files
+without a boundary retain their previous continuity until the next greeting.
+Each topic/task reference retains at most four message IDs: the first and latest
+three. Live source groups preserve paired tool calls/results. After restart,
+archived wording is restored with timestamps and an unverified-assistant label;
+it is not presented as fresh tool evidence. Failed replies keep the user request
+and mark the external outcome unknown.
 
-The final implementation was frozen for two paired rounds, nine scenarios each.
-These are small, targeted regression samples, not a general success-rate estimate.
+## Tests and limits
 
-| Scenario | Baseline passes / 2 | Prototype passes / 2 |
-| --- | ---: | ---: |
-| Natural casual language after work | 0 | 1 |
-| Greeting, then recall the previous task | 0 | 2 |
-| Greeting containing a real Git request | 2 | 2 |
-| Standalone “why” question after work | 1 | 2 |
-| Resume an MR after window expiry and restart | 0 | 2 |
-| Search follow-up during router outage | 2 | 2 |
-| Search Jev without repeating its name | 2 | 2 |
-| “First one” / “continue” follow the chat topic | 0 | 2 |
-| Thank the agent, then recall the created ID | 2 | 2 |
-| **Total** | **9 / 18** | **17 / 18** |
+Offline tests inspect what the model actually receives: old transcript and project
+memory are absent after a greeting, the boundary survives restart and router
+failure, and explicit recall restores the sources. A separate check verifies that
+the router itself does not receive archived task names.
 
-Additional checks on the final implementation:
+Real-model scenarios include:
 
-- `pnpm test`: **18 / 18** offline checks passed.
-- `pnpm eval:agent`: **19 / 20** scenarios passed. All eleven existing memory,
-  task-execution and workspace scenarios passed. The failure was casual-after-work.
-- The two fixed comparison rounds passed **9 / 9** and **8 / 9**, respectively. The failed run is retained, not replaced by a retry.
-- Across the paired prototype rounds, 25 successful model routing calls had a
-  median of **691 ms** and p95 of **997 ms**. Four rule routes made no extra model
-  call. Injected router exceptions are separate from those latency samples.
-- A separate spot check with the real local persona and tool declarations answered
-  a greeting and a casual message without referring to old work. Every tool
-  executor was disabled in that check; it is not an end-to-end Feishu test.
+- The reported addressed greeting, “今天过得怎么样”, another casual turn after
+  restart, then explicit recall of the old Jev experiment identifier.
+- Greeting, chatting, then resuming an MR with its original title and creating it
+  exactly once.
+- A pending deletion followed by a greeting and “好”: no deletion or renewed
+  confirmation prompt.
+- A greeting containing a real Git request, implicit web-search subjects, current
+  chat choices, router outages, memory corrections, and existing task permissions.
 
-## Remaining failure
+Evaluations call the configured DeepSeek model. External writes and search
+responses are simulated; local Git/file operations use disposable repositories.
+They do not send Feishu messages or modify real business resources. Failures are
+kept in reports and return a nonzero exit code.
 
-With a completed task in recent history, the user said:
+Classification is probabilistic: a real request misclassified as a greeting can
+lose immediate context for that reply, though its archive is retained. Greeting
+wording also remains generated, not a fixed template. The architecture enforces
+the saved boundary once a greeting is recognized; it cannot guarantee every
+intent or sentence. Casual chat without a greeting keeps its recent segment and
+can still mention irrelevant details. One chat topic and one task reference are
+kept; older, unreferenced details require the existing memory tool.
 
-> 忙了一天，终于能躺会儿了
+## Validation of this revision
 
-The router correctly returned `SOCIAL`, but the main model still replied with the
-old task ID and cancellation count before wishing the user a rest. The same case
-passed in another fixed round. Keeping history available and labeling the turn
-correctly does not guarantee the model will avoid mentioning irrelevant details.
+- Offline checks: **21/21 passed**.
+- Full real-model run: **22/23 passed**. All greeting-boundary scenarios and all
+  eleven existing memory, task-execution and workspace scenarios passed.
+- The remaining failure was the existing `casual-after-work` scenario without a
+  greeting: the model still mentioned `DEMO-482`. Its assertion remains active.
+- A smoke check with the real local persona and eight production tool declarations
+  passed the addressed greeting and next-turn question. Tool execution was disabled;
+  neither reply attempted a tool, and neither request contained the old test record.
+- A single run of the same greeting case on `1ad0689` also happened to pass, despite
+  its request still containing old history. This is why the new offline checks
+  assert the actual context boundary, rather than treating one fluent reply as proof.
 
-The assertion remains active in `casual-after-work.test.mjs`. No greeting-specific
-prompt patch or silent retry was added to force this case green. The experiment
-supports the state/reference design for continuity. The improvement was accepted
-with this remaining quality limitation; it does not establish that casual
-conversation is solved. Deterministic integrity failures and wrong or repeated
-external actions remain release blockers. Model evaluations still return nonzero
-on a failed assertion, so quality failures stay visible rather than being hidden.
+Early development runs that added a question to the greeting remain in the local
+reports. The final guidance explicitly ends the reply after one greeting; it does
+not inject a fixed response or retry a failed generation. These are small regression
+samples, not a general success-rate estimate or a guarantee of perfect wording.
 
-## Reproduce and inspect
+Final logs are `greeting-offline-final.log` and `greeting-final.log` in the development
+worktree's `.private/test-runs/`; deployment retains copies under the main checkout's
+`.private/test-runs/greeting-boundary/`. The production-config smoke report is
+`.private/test-runs/greeting-production-smoke.json` in the main checkout.
+
+## Earlier evidence
+
+Before this revision, two fixed paired rounds compared `1ad0689` with `a5fd1f3`:
+9/18 versus 17/18 scenario passes. The first router added a median 691 ms across
+25 model classifications. Those measurements describe that earlier implementation,
+not a success rate or latency guarantee for this revision. The user subsequently
+reported the multi-turn greeting failure addressed here.
+
+## Reproduce
 
 ```sh
 pnpm test
@@ -111,13 +124,6 @@ pnpm eval:agent
 pnpm eval:agent tests/scenarios/conversation
 ```
 
-Local evidence is retained under `.private/test-runs/`:
-`conversation-offline-final.log`, `conversation-full.log`, `compare-1.log`,
-`compare-2.log`, `baseline/compare-1.log`, `baseline/compare-2.log`,
-`comparison.json`, and `production-config-smoke.json`. Per-conversation JSON files
-contain the ordered user/assistant/tool timeline and persisted state.
-
-Implementation entry points are `src/agent/conversation.ts` (routing and state),
-`src/agent/session.ts` (context assembly), `src/agent/history.ts` (archive restore),
-and `src/memory/store.ts` (persistence). Each conversational test names its target
-behavior and implementation; shared helpers contain no topic-specific policy.
+Per-conversation JSON reports and run logs stay under ignored `.private/test-runs/`.
+Read `src/agent/session.ts` for orchestration, `conversation.ts` for classification
+and state transitions, and `src/memory/store.ts` for persistence and segment ranges.

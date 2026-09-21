@@ -26,8 +26,8 @@ test("暂停、窗口过期和重启不丢任务来源，存活会话保留完�
             },
         };
         const router = async text => text === "你好"
-            ? {...uncertainTurn(), source: "rule", intent: "SOCIAL", standaloneSocial: true}
-            : {...uncertainTurn(), source: "model", intent: "FOLLOW_UP", topic: "文档", task: text === "查文档" ? "start" : "continue"};
+            ? {...uncertainTurn(), source: "rule", mode: "greet", history: "new"}
+            : {...uncertainTurn(), source: "model", mode: "task", topic: "文档", history: text === "查文档" ? "new" : "recall"};
         let session = new AgentSession(agent, store, {schedule() {}}, router);
         await session.run("work", "查文档");
         await session.run("hello", "你好");
@@ -72,5 +72,42 @@ test("生成中断和路由故障后再试，保留新对象而不复用半截�
         await assert.rejects(session.run("failed", "改查新文档 DOC-NEW-921"), /generation interrupted/);
         assert.equal(await session.run("retry", "再试一下"), "恢复完成");
         assert.ok(store.recentTurns().find(t => t.messageId === "failed").failed);
+    } finally {await rm(directory, {recursive: true, force: true});}
+});
+
+// The reset is durable and also applies to memory injection, not just one greeting.
+test("带称呼的问候建立持久边界，重启和路由故障都不会把旧事带回闲聊", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "emilia-greeting-"));
+    try {
+        let store = await MemoryStore.open(directory);
+        await store.recordUser("old", "昨天讨论 Jev，并取消 DEMO-482 的 35 条认领。");
+        await store.recordAssistant("old", "处理完成。");
+        await store.apply([{operation: "upsert", category: "project", text: "Jev 项目 DEMO-482", sourceMessageIds: ["old"]}], 1);
+        assert.match(store.context(), /Jev 项目 DEMO-482/);
+        const requests = [];
+        const agent = {
+            state: {model: {api: "test", provider: "test", id: "test"}, messages: [{role: "system", content: "persona"}]},
+            async prompt(message) {
+                requests.push(structuredClone(this.state.messages));
+                this.state.messages.push(message, {role: "assistant", content: [{type: "text", text: "好呀"}]});
+            },
+        };
+        let session = new AgentSession(agent, store, {schedule() {}}, async () => ({
+            ...uncertainTurn(), source: "model", mode: "greet", history: "new",
+        }));
+        await session.run("hello", "晚上好呀爱蜜莉雅");
+        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /Jev|DEMO-482|35/);
+        store = await MemoryStore.open(directory);
+        assert.equal(store.conversation().segmentStart, "hello");
+        session = new AgentSession(agent, store, {schedule() {}}, async () => {throw new Error("router unavailable");});
+        await session.run("day", "今天过得怎么样");
+        assert.match(JSON.stringify(requests.at(-1)), /晚上好呀爱蜜莉雅/);
+        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /Jev|DEMO-482|35/);
+        assert.equal(store.turnsById(["old"]).length, 1);
+        session = new AgentSession(agent, store, {schedule() {}}, async () => ({
+            ...uncertainTurn(), source: "model", mode: "chat", history: "recall", topic: "Jev",
+        }));
+        await session.run("recall", "昨天那个 Jev，我们说到哪了？");
+        assert.match(JSON.stringify(requests.at(-1)), /Jev/);
     } finally {await rm(directory, {recursive: true, force: true});}
 });

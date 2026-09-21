@@ -23,7 +23,7 @@ tool calls, results, and assertion failure. Reports and credentials stay local.
 
 | Cases | Implemented behavior |
 | --- | --- |
-| `scenarios/conversation/` | `agent/conversation.ts`, `session.ts`, `history.ts`: greetings, implicit search subjects, acknowledgements, topic changes, paused tasks and router outages. |
+| `scenarios/conversation/` | `agent/conversation.ts`, `session.ts`, `history.ts`: greeting boundaries across several turns and restart, implicit search subjects, acknowledgements, topic changes, paused tasks and router outages. |
 | `scenarios/memory/archived-time` | `src/time.ts` and `src/memory/store.ts`: archived timestamps override an earlier incorrect assistant answer. |
 | `scenarios/memory/remember-profile` | Memory extraction, JSON persistence, and `AgentSession` context restore a responsibility after restart. |
 | `scenarios/memory/ignore-small-talk` | The distiller avoids turning casual conversation into durable memory. |
@@ -33,7 +33,7 @@ tool calls, results, and assertion failure. Reports and credentials stay local.
 | `scenarios/workspace/correct-file-target` | User correction redirects `workspace_files`; assertions inspect both repositories' actual files. |
 | `scenarios/workspace/find-source-symbol` | The model calls `configured-cli` and the real C++ search binary to locate a source definition. |
 | `memory.test.mjs` | Offline checks for storage, source provenance and timestamp rendering. |
-| `conversation.test.mjs`, `session-conversation.test.mjs` | Routing failure and misclassification cannot drop recent references; topic/task state survives restart, with paired tool results preserved while live. |
+| `conversation.test.mjs`, `session-conversation.test.mjs` | Current-segment continuity, durable greeting boundaries, archived-context exclusion from both routing and responses, memory scope, and paired tool results while live. |
 | `message-flow.test.mjs` | Offline message queuing, failed generation recovery, and streaming-card fallback. |
 | `native-search.test.mjs` | Offline search results, private-path exclusions, traversal rejection, and named workspace selection. |
 
@@ -64,7 +64,4 @@ schema. `support/web-search.mjs` returns fixed public snippets without giving
 corrective instructions to a bad query. Conversation reports include the route,
 its latency, and the state saved after each reply.
 
-See [the experiment report](../docs/conversation-routing.md) for the fixed two-round
-comparison against the rollback version. `casual-after-work` remains a known
-intermittent failure; it is not skipped, retried automatically, or marked as an
-expected pass. A successful router label alone does not pass the scenario.
+See [the design and evaluation report](../docs/conversation-routing.md) for current checks and the earlier comparison. Greeting cases assert the full exchange, not just a router label. `greeting-does-not-confirm-task` checks that “好” after a greeting cannot approve an old deletion request. All assertions remain active; a failed run is retained rather than silently retried.

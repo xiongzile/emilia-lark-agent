@@ -137,8 +137,12 @@ export class MemoryStore {
         return this.memories.entries.filter((entry) => !category || entry.category === category);
     }
 
-    recentTurns(limit = 20): Turn[] {
-        return this.transcript.turns.filter(turn => (turn.assistant !== undefined || turn.failed) &&
+    recentTurns(limit = 20, range: {from?: string; before?: string} = {}): Turn[] {
+        const turns = this.transcript.turns;
+        const from = range.from ? turns.findIndex(turn => turn.messageId === range.from) : 0;
+        const before = range.before ? turns.findIndex(turn => turn.messageId === range.before) : turns.length;
+        if (from < 0 || before < 0) return [];
+        return turns.slice(from, before).filter(turn => (turn.assistant !== undefined || turn.failed) &&
             !/^\/memory(?:\s|$)/.test(turn.user.trim())).slice(-limit);
     }
 
@@ -171,9 +175,10 @@ export class MemoryStore {
             .map(({item}) => ({...item, text: item.text.slice(0, 2000)}));
     }
 
-    context(turns = this.recentTurns(), includeWork = true): string {
+    context(turns = this.recentTurns(), scope: "all" | "stable" | "personal" = "all"): string {
         const active = this.memories.entries.filter(entry => entry.status === "active" &&
-            (includeWork || (entry.category !== "progress" && entry.category !== "open_issue")));
+            (scope === "all" || (scope === "personal" ? ["profile", "preference"].includes(entry.category)
+                : entry.category !== "progress" && entry.category !== "open_issue")));
         const core = [
             ...active.filter((entry) => entry.category !== "progress"),
             ...active.filter((entry) => entry.category === "progress").slice(-5),

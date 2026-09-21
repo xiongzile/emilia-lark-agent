@@ -77,19 +77,23 @@ export class AgentSession {
                 reply = await memoryCommand(text, this.store, this.distiller);
                 this.turnMessages.clear();
             } else {
-                const recent = this.store.recentTurns(6);
+                const recent = this.store.recentTurns(6, {from: state.segmentStart});
                 const route = await this.router(text, state, recent).catch(() => uncertainTurn());
-                const ids = contextTurnIds(route, state, recent);
+                const archived = route.history === "recall" && state.segmentStart
+                    ? this.store.recentTurns(6, {before: state.segmentStart}) : [];
+                const ids = contextTurnIds(route, state, recent, archived);
+                const memoryScope = route.mode === "greet" ||
+                    (state.segmentStart && route.mode === "chat" && route.history !== "recall") ? "personal" : "stable";
                 console.log("[Turn route]", {...route, topic: undefined, messageIds: ids});
                 const system = this.agent.state.messages[0];
                 if (system?.role !== "system") throw new Error("Agent system message missing");
                 this.agent.state.messages = [
-                    {...system, sections: {...system.sections, memory: this.store.context([], false)}},
+                    {...system, sections: {...system.sections, memory: this.store.context([], memoryScope), turn: turnGuidance(route)}},
                     ...this.store.turnsById(ids).flatMap(turn =>
                         this.turnMessages.get(turn.messageId) ?? restoreTurn(turn, this.agent.state.model)),
                 ];
                 const start = this.agent.state.messages.length;
-                reply = await promptAgent(this.agent, text, write, turnGuidance(route));
+                reply = await promptAgent(this.agent, text, write, {includeRuntime: route.mode !== "greet"});
                 this.turnMessages.set(messageId, this.agent.state.messages.slice(start));
                 state = advanceConversation(state, route, messageId);
                 const retained = new Set([messageId, ...recent.slice(-5).map(turn => turn.messageId),
