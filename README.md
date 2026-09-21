@@ -9,6 +9,7 @@ A self-hosted Lark/Feishu bot that streams DeepSeek responses into interactive c
 - Gives the agent the current date, time, and time zone for each turn, and logs model token/cache usage.
 - Runs `lark-cli` as a tool for Lark operations available to the configured user or bot identity and its permissions.
 - Lists, reads, and writes UTF-8 files inside named workspaces, and runs an allowlisted set of Git commands there. Destructive Git commands and force pushes are disabled.
+- Can search source text with an optional C++ CLI tool. It stays inside the selected workspace and skips hidden paths, generated directories, symlinks, binary files, and files over 1 MiB.
 - Loads private workspaces, prompt instructions, and additional constrained command-line tools from an ignored local config.
 - Optionally searches the public web through Tavily, returning up to five short excerpts with source URLs when `TAVILY_API_KEY` is configured.
 - Saves direct-chat wording in ignored local JSON files, distills durable facts into categorized memory, and lets the agent search older memories or transcripts when needed.
@@ -24,6 +25,7 @@ Send `/memory` for counts and extraction status, `/memory list [category]` to in
 
 - Node.js with native TypeScript stripping support
 - pnpm 10
+- CMake and a C++17 compiler for the native source-search tool
 - Git submodules initialized (`git clone --recurse-submodules` or `git submodule update --init --recursive`)
 - A Lark/Feishu custom app with long-connection event delivery enabled
 - A DeepSeek API key
@@ -39,6 +41,7 @@ git submodule update --init --recursive
 pnpm build:pi
 pnpm install
 pnpm build
+pnpm build:native
 pnpm test
 pnpm start
 ```
@@ -51,9 +54,17 @@ Pi source is pinned as the `vendor/pi` submodule. The two Pi dependencies link t
 
 ## Testing
 
-`pnpm test` runs offline checks for memory persistence and the message flow, including a failed streaming card and an interrupted generation followed by another message. No Feishu app or API key is needed.
+Tests must catch a real user-facing failure and read like the conversation they exercise. Keep dialogue and business expectations visible in each scenario; put setup and transport details in shared helpers. Check observable outcomes such as writes occurring only once, saved memory, and file contents. Test doubles should reject unsupported commands, and deliberately broken behavior should fail the relevant checks.
 
-`pnpm eval:agent` calls DeepSeek using `DEEPSEEK_API_KEY` from the environment or local `.env`. It creates temporary Git workspaces and memory files, then checks whether the agent reports archived chat times in Beijing time, remembers a stable responsibility across a restart, corrects a mistaken repository mapping before reading Git history, and avoids treating an unsupported assistant success claim as verified progress. The run never sends Feishu messages or writes to your configured workspaces. Failures return a nonzero exit code; a local JSON report is saved under `.private/test-runs/` with the observed answers, memories, and tool calls. Model evaluations can vary between runs and consume API tokens.
+`pnpm test` builds the C++ search tool and runs offline checks for its workspace boundaries, memory persistence, and the message flow, including a failed streaming card and an interrupted generation followed by another message. No Feishu app or API key is needed.
+
+`pnpm eval:agent` calls DeepSeek using `DEEPSEEK_API_KEY` from the environment or local `.env`. Conversation cases live in `tests/scenarios/`, grouped by memory, task execution, and workspace tools. Each file covers one behavior and identifies the implementation it exercises. The Node test runner handles discovery, process isolation, and failures; shared helpers handle temporary workspaces and the conversation timeline.
+
+Run a feature with `pnpm eval:agent tests/scenarios/memory`, or pass one `.test.mjs` file. See [the test guide](tests/README.md) for the feature map and how to add a conversation.
+
+These evaluations check saved memory, actual temporary-file contents, and tool arguments and call counts. External service commands are simulated: no Feishu message is sent and no configured user workspace is modified. Each case saves an ordered conversation/tool report under `.private/test-runs/` and returns a nonzero exit code on failure. Model evaluations can vary between runs and consume API tokens.
+
+TODO: Consider Jev for tool routing or high-volume classification only when measured task success, latency, and cost show a benefit over the current DeepSeek flow.
 
 ## Private extensions
 
@@ -70,6 +81,21 @@ Edit `.private/agent.json` to add named workspaces and constrained command tools
 Keep the always-loaded private prompt short. Put detailed project mappings and procedures in `.private/knowledge/` and let the agent read them through `workspace_files` when a task needs them.
 
 Configured commands use `execFile` without a shell. Policies can restrict the first argument, individual arguments, consecutive argument sequences, and regular-expression matches. This provides a useful boundary but does not turn an unsafe executable into a sandbox; expose narrowly scoped CLIs and keep their authentication outside the agent.
+
+To enable the C++ search tool, add this object to the `commandTools` array in `.private/agent.json` after `pnpm build:native` (replace the executable with your checkout's absolute path):
+
+```json
+{
+  "name": "workspace_search",
+  "label": "Workspace Search (C++)",
+  "executable": "/path/to/repo/.local/native-build/workspace-search",
+  "description": "Search literal source text in a named workspace. args: [query, optional relative path], optionally prefixed with --ignore-case. Narrow the path in large repositories.",
+  "timeoutMs": 30000,
+  "maxOutputBytes": 65536
+}
+```
+
+The executable accepts a literal query and optional relative path. It returns `path:line:column: excerpt`, at most 80 matching lines, and stops after 30,000 files; narrow the path if that limit is reached.
 
 For a team, keep the internal configuration in a separate private repository or private package and generate `.private/agent.json` during setup. Avoid public/private branches that carry different source trees: they drift and make accidental disclosure more likely.
 

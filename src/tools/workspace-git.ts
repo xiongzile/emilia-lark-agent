@@ -5,6 +5,7 @@ import {getWorkspaceRoot, workspaceNames} from "../config/workspaces.ts";
 
 const parameters = Type.Object({
     workspace: Type.Optional(Type.String({
+        enum: workspaceNames,
         description: `Named Git workspace. Defaults to agent. Available: ${workspaceNames.join(", ")}.`,
     })),
     args: Type.Array(Type.String(), {

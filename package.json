@@ -7,9 +7,10 @@
   "packageManager": "pnpm@10.17.1",
   "scripts": {
     "build": "tsc",
-    "test": "pnpm build && node --test tests/*.test.mjs",
-    "eval:agent": "pnpm build && node --env-file-if-exists=.env tests/eval-agent.mjs",
+    "test": "pnpm build && pnpm build:native && node --test tests/*.test.mjs",
+    "eval:agent": "pnpm build && pnpm build:native && node --env-file-if-exists=.env tests/eval-agent.mjs",
     "build:pi": "node scripts/build-pi.mjs",
+    "build:native": "cmake -S native -B .local/native-build -DCMAKE_BUILD_TYPE=Release && cmake --build .local/native-build --parallel 2",
     "audit:public": "node scripts/check-public.mjs",
     "debug:agent": "node --env-file-if-exists=.env --inspect-brk --enable-source-maps src/index.ts",
     "start": "node --env-file-if-exists=.env --enable-source-maps src/index.ts",

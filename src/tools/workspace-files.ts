@@ -9,6 +9,7 @@ const maxWriteBytes = 1024 * 1024;
 
 const parameters = Type.Object({
     workspace: Type.Optional(Type.String({
+        enum: workspaceNames,
         description: `Named workspace. Defaults to agent. Available: ${workspaceNames.join(", ")}.`,
     })),
     operation: Type.Union([
