@@ -1,3 +1,4 @@
+import {createTurnRouter} from "./conversation.ts";
 import {Agent, type AgentTool} from "@earendil-works/pi-agent-core";
 import {createModels} from "@earendil-works/pi-ai";
 // @ts-ignore
@@ -96,5 +97,5 @@ export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[]) {
         }
     });
 
-    return {agent, distiller: new MemoryDistiller(memory, models, model)};
+    return {agent, distiller: new MemoryDistiller(memory, models, model), router: createTurnRouter(models, model)};
 }

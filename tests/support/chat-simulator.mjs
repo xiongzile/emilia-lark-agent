@@ -24,6 +24,7 @@ export function mockCommand({name, description, rules}) {
 function matchesCall(call, expected) {
     if (call.tool !== expected.tool) return false;
     const actual = call.args;
+    if (expected.query && !expected.query.test(actual.query ?? "")) return false;
     if (expected.workspace && (actual.workspace ?? "agent") !== expected.workspace) return false;
     for (const field of ["operation", "path"]) {
         if (expected[field] !== undefined && actual[field] !== expected[field]) return false;
@@ -69,7 +70,7 @@ async function checkExpect(expect, {reply, calls, store, workspaces}) {
 }
 
 export function createChatSimulator({fixture, workspaces, MemoryStore, createDeepSeekAgent, AgentSession, toolRegistry}) {
-    return async function play({history = [], tools = ["memory", "git"], events}) {
+    return async function play({history = [], tools = ["memory", "git"], events, routerUnavailable = false}) {
         const directory = await mkdtemp(join(fixture, "memory-"));
         if (history.length) {
             await writeFile(join(directory, "transcript.json"), JSON.stringify({
@@ -98,7 +99,12 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
             );
             const runtime = createDeepSeekAgent(store, resolvedTools);
             distiller = runtime.distiller;
-            session = new AgentSession(runtime.agent, store, distiller);
+            session = new AgentSession(runtime.agent, store, distiller, async (...args) => {
+                if (routerUnavailable) throw new Error("simulated router outage");
+                const route = await runtime.router(...args);
+                timeline.push({type: "route", ...route});
+                return route;
+            });
             runtime.agent.subscribe((event) => {
                 if (event.type === "tool_execution_start") {
                     calls.push({tool: event.toolName, args: event.args});
@@ -120,10 +126,12 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
                     timeline.push({type: "user", text: event.user});
                     reply = await session.run(event.id ?? `turn-${index + 1}`, event.user);
                     timeline.push({type: "assistant", text: reply});
+                    timeline.push({type: "conversation_state", ...store.conversation()});
                 } else if (event.distill) {
                     const changes = await distiller.update();
                     timeline.push({type: "distill", changes});
                 } else if (event.restart) {
+                    await distiller.stop();
                     store = await MemoryStore.open(directory);
                     start();
                     timeline.push({type: "restart"});
@@ -143,6 +151,8 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
         } catch (error) {
             error.timeline = timeline;
             throw error;
+        } finally {
+            await distiller.stop();
         }
         return timeline;
     };

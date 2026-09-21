@@ -6,9 +6,9 @@ import {MemoryStore} from "./memory/store.ts";
 
 async function main(): Promise<void> {
     const memory = await MemoryStore.open();
-    const {agent, distiller} = createDeepSeekAgent(memory);
+    const {agent, distiller, router} = createDeepSeekAgent(memory);
     if (memory.status().pending > 0) distiller.schedule(true);
-    const session = new AgentSession(agent, memory, distiller);
+    const session = new AgentSession(agent, memory, distiller, router);
     await startFeishu(createFeishuMessageHandler(session, {
         reply: replyFeishu,
         processing: showFeishuProcessing,

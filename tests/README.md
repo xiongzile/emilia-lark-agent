@@ -23,6 +23,7 @@ tool calls, results, and assertion failure. Reports and credentials stay local.
 
 | Cases | Implemented behavior |
 | --- | --- |
+| `scenarios/conversation/` | `agent/conversation.ts`, `session.ts`, `history.ts`: greetings, implicit search subjects, acknowledgements, topic changes, paused tasks and router outages. |
 | `scenarios/memory/archived-time` | `src/time.ts` and `src/memory/store.ts`: archived timestamps override an earlier incorrect assistant answer. |
 | `scenarios/memory/remember-profile` | Memory extraction, JSON persistence, and `AgentSession` context restore a responsibility after restart. |
 | `scenarios/memory/ignore-small-talk` | The distiller avoids turning casual conversation into durable memory. |
@@ -31,13 +32,14 @@ tool calls, results, and assertion failure. Reports and credentials stay local.
 | `scenarios/task-execution/` | `src/prompts/emilia.ts`: act on a confirmed request, respect the requested identity, report permission denial, and clarify missing information. External CLI responses are simulated. |
 | `scenarios/workspace/correct-file-target` | User correction redirects `workspace_files`; assertions inspect both repositories' actual files. |
 | `scenarios/workspace/find-source-symbol` | The model calls `configured-cli` and the real C++ search binary to locate a source definition. |
-| `memory.test.mjs`, `context-state.test.mjs` | Offline checks for storage, source provenance, timestamp rendering, and context refresh. |
+| `memory.test.mjs` | Offline checks for storage, source provenance and timestamp rendering. |
+| `conversation.test.mjs`, `session-conversation.test.mjs` | Routing failure and misclassification cannot drop recent references; topic/task state survives restart, with paired tool results preserved while live. |
 | `message-flow.test.mjs` | Offline message queuing, failed generation recovery, and streaming-card fallback. |
 | `native-search.test.mjs` | Offline search results, private-path exclusions, traversal rejection, and named workspace selection. |
 
 ## Add a conversation
 
-Use `conversation({name, history, tools, files, events})` from
+Use `conversation({name, history, tools, files, events, routerUnavailable})` from
 `support/agent-fixture.mjs`. Only `name` and `events` are required. `history`
 seeds prior dialogue; `files` seeds temporary workspace files; `tools` selects
 real local tools (`memory`, `git`, `files`, `search`) or explicit mock commands.
@@ -55,3 +57,14 @@ and expectations in the case file; shared helpers contain no business scenarios.
 
 No test connects to Feishu or a localization service. Simulated service results
 test the agent's decisions, not the real service's permissions or delivery.
+
+`routerUnavailable: true` injects a routing failure while still calling the real
+main model. Call expectations support `query: /pattern/` for the real search
+schema. `support/web-search.mjs` returns fixed public snippets without giving
+corrective instructions to a bad query. Conversation reports include the route,
+its latency, and the state saved after each reply.
+
+See [the experiment report](../docs/conversation-routing.md) for the fixed two-round
+comparison against the rollback version. `casual-after-work` remains a known
+intermittent failure; it is not skipped, retried automatically, or marked as an
+expected pass. A successful router label alone does not pass the scenario.

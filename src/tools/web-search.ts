@@ -1,7 +1,7 @@
 import {Type} from "@earendil-works/pi-ai";
 import type {AgentTool} from "@earendil-works/pi-agent-core";
 
-const parameters = Type.Object({
+export const parameters = Type.Object({
     query: Type.String({description: "A short search query about public information."}),
     topic: Type.Optional(Type.Union([Type.Literal("general"), Type.Literal("news")])),
 });
