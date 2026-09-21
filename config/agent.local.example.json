@@ -1,0 +1,25 @@
+{
+  "workspaces": {
+    "agent": ".",
+    "another-project": "../another-project"
+  },
+  "promptFiles": [
+    "prompt.local.md"
+  ],
+  "commandTools": [
+    {
+      "name": "project_cli",
+      "label": "Project CLI",
+      "executable": "project-cli",
+      "description": "Run the locally installed project CLI with JSON output.",
+      "prependArgs": ["--json"],
+      "allowedFirstArgs": ["issues", "reviews"],
+      "blockedFirstArgs": ["auth", "config"],
+      "blockedArgs": ["--force"],
+      "blockedArgSequences": [["project", "delete"]],
+      "blockedArgPatterns": ["^dangerous-"],
+      "timeoutMs": 120000,
+      "maxOutputBytes": 2097152
+    }
+  ]
+}
