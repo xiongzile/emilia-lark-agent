@@ -1,5 +1,6 @@
 import type {Api, Model, Models} from "@earendil-works/pi-ai";
 import {memoryCategories, type MemoryChange, type MemoryStore} from "./store.ts";
+import {formatAgentTime} from "../time.ts";
 
 const instructions = `你负责从私人聊天中维护精炼记忆。只返回 JSON：{"changes":[...]}，没有变化则返回 {"changes":[]}。
 每项为 {"operation":"upsert|resolve|needs_check","id":"仅更新已有记忆时填写现有 ID；新增时不要填写","category":"profile|preference|project|decision|progress|open_issue","text":"一句具体事实","status":"active|needs_check","sourceMessageIds":["消息 ID"]}。
@@ -66,7 +67,7 @@ export class MemoryDistiller {
         return this.running;
     }
 
-    private async extract(turns: Array<{messageId: string}>, audit: boolean): Promise<MemoryChange[]> {
+    private async extract(turns: Array<{messageId: string; at: string}>, audit: boolean): Promise<MemoryChange[]> {
         const response = await this.models.completeSimple(this.model, {
             systemPrompt: instructions,
             messages: [{
@@ -74,7 +75,7 @@ export class MemoryDistiller {
                 content: JSON.stringify({
                     task: audit ? "仅核对近期聊天是否明确纠正或否定现有记忆。没有新证据就不要修改任何条目；无法访问外部状态本身不是过期证据。" : "提炼新增聊天",
                     existing: this.store.list(),
-                    turns,
+                    turns: turns.map((turn) => ({...turn, at: formatAgentTime(turn.at)})),
                 }),
                 timestamp: Date.now(),
             }],

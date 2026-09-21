@@ -1,6 +1,7 @@
 import {Type} from "@earendil-works/pi-ai";
 import type {AgentTool} from "@earendil-works/pi-agent-core";
 import type {MemoryStore} from "./store.ts";
+import {formatAgentTime} from "../time.ts";
 
 const parameters = Type.Object({
     operation: Type.Union([Type.Literal("search"), Type.Literal("read")]),
@@ -22,7 +23,8 @@ export function createMemoryTool(store: MemoryStore): AgentTool<typeof parameter
             let result: unknown;
             if (operation === "read") {
                 if (!id) throw new Error("id is required for read");
-                result = store.get(id) ?? {error: "Memory not found"};
+                const entry = store.get(id);
+                result = entry ? {...entry, updatedAt: formatAgentTime(entry.updatedAt)} : {error: "Memory not found"};
             } else {
                 if (!query?.trim()) throw new Error("query is required for search");
                 result = store.search(query, source === "transcript");

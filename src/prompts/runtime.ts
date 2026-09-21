@@ -1,37 +1,20 @@
-const timeZone = "Asia/Shanghai";
-
-const dateTimeFormatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-});
+import {agentTimeZone, formatAgentTime} from "../time.ts";
 
 const weekdayFormatter = new Intl.DateTimeFormat("zh-CN", {
-    timeZone,
+    timeZone: agentTimeZone,
     weekday: "long",
 });
 
 export function currentRuntimeContext(now = new Date()): string {
-    const parts = Object.fromEntries(
-        dateTimeFormatter
-            .formatToParts(now)
-            .filter((part) => part.type !== "literal")
-            .map((part) => [part.type, part.value]),
-    );
-    const date = `${parts.year}-${parts.month}-${parts.day}`;
-    const time = `${parts.hour}:${parts.minute}:${parts.second}`;
+    const localTime = formatAgentTime(now);
+    const date = localTime.slice(0, 10);
 
     return [
         "<runtime_context>",
-        `current_datetime: ${date}T${time}+08:00`,
+        `current_datetime: ${localTime}`,
         `current_date: ${date}`,
         `weekday: ${weekdayFormatter.format(now)}`,
-        `timezone: ${timeZone}`,
+        `timezone: ${agentTimeZone}`,
         "This context is generated at request time and is authoritative.",
         "</runtime_context>",
     ].join("\n");

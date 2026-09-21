@@ -83,6 +83,20 @@ try {
         }
     }
 
+    await scenario("historical chat time uses Beijing timezone", async (trace) => {
+        const path = join(fixture, "memory-time");
+        await mkdir(path, {recursive: true});
+        await writeFile(join(path, "transcript.json"), JSON.stringify({version: 1, turns: [
+            {messageId: "time-1", at: "2026-09-21T10:28:54.790Z", user: "R8 和 Redex 有什么区别？", assistant: "它们是不同的 Android 优化工具。"},
+            {messageId: "time-2", at: "2026-09-21T11:05:00.000Z", user: "上次讨论是什么时候？", assistant: "我们在上午 10:28 讨论了 R8 和 Redex。"},
+        ]}));
+        const store = await MemoryStore.open(path);
+        const {session} = runtime(store, trace);
+        const answer = await session.run("time-3", "我们第一次聊 R8 和 Redex 是北京时间几点？只给出 YYYY-MM-DD HH:mm。");
+        assert.match(answer, /2026-09-21\s+18:28/, "the answer must use the archived message time in Beijing, not the old assistant's incorrect summary");
+        return {answer};
+    });
+
     await scenario("memory survives restart without saving small talk", async (trace) => {
         const path = join(fixture, "memory-basic");
         const store = await MemoryStore.open(path);

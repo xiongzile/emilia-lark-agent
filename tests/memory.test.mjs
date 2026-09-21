@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import {mkdtemp, readFile, rm} from "node:fs/promises";
+import {mkdtemp, readFile, rm, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {test} from "node:test";
 import {MemoryStore} from "../dist/memory/store.js";
 import {MemoryDistiller} from "../dist/memory/distill.js";
+import {AgentSession} from "../dist/agent/session.js";
 
 test("raw turns survive restart and only distilled facts enter core memory", async () => {
     const directory = await mkdtemp(join(tmpdir(), "emilia-memory-"));
@@ -16,6 +17,7 @@ test("raw turns survive restart and only distilled facts enter core memory", asy
             async completeSimple(_model, context) {
                 const input = JSON.parse(context.messages[0].content);
                 assert.equal(input.turns[0].messageId, "m1");
+                assert.match(input.turns[0].at, /\+08:00$/);
                 return {
                     stopReason: "stop",
                     content: [{type: "text", text: JSON.stringify({changes: [{
@@ -38,6 +40,29 @@ test("raw turns survive restart and only distilled facts enter core memory", asy
         assert.equal(reopened.search("记住 pi", true).length, 1);
         assert.deepEqual(JSON.parse(await readFile(join(directory, "transcript.json"), "utf8")).turns[0].user,
             "记住：pi 是我的 agent 工程");
+    } finally {
+        await rm(directory, {recursive: true, force: true});
+    }
+});
+
+test("historical chat times are shown in Beijing time while the archive stays UTC", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "emilia-memory-time-"));
+    try {
+        const utc = "2026-09-21T10:28:54.790Z";
+        await writeFile(join(directory, "transcript.json"), JSON.stringify({version: 1, turns: [{
+            messageId: "history-1", at: utc, user: "R8 和 Redex 有什么区别？", assistant: "两种优化工具。",
+        }]}));
+        await writeFile(join(directory, "memories.json"), JSON.stringify({
+            version: 1, processedCount: 1, updatedAt: "2026-09-21T11:06:46.278Z", entries: [],
+        }));
+        const store = await MemoryStore.open(directory);
+        assert.match(store.context(), /2026-09-21T18:28:54\+08:00 用户：R8/);
+        assert.equal(store.search("R8", true)[0].at, "2026-09-21T18:28:54+08:00");
+
+        const session = new AgentSession(null, store, null);
+        const status = await session.run("status-1", "/memory status");
+        assert.match(status, /上次提炼：2026-09-21T19:06:46\+08:00/);
+        assert.equal(JSON.parse(await readFile(join(directory, "transcript.json"), "utf8")).turns[0].at, utc);
     } finally {
         await rm(directory, {recursive: true, force: true});
     }

@@ -3,6 +3,7 @@ import {advanceContext, needsContext, type ContextState} from "../channels/conte
 import {MemoryDistiller} from "../memory/distill.ts";
 import {memoryCategories, type MemoryCategory, type MemoryStore} from "../memory/store.ts";
 import {promptAgent} from "./turn.ts";
+import {formatAgentTime} from "../time.ts";
 
 export function isMemoryCommand(text: string): boolean {
     return /^\/memory(?:\s|$)/.test(text.trim());
@@ -13,7 +14,7 @@ function memoryStatus(store: MemoryStore): string {
     const counts = Object.entries(status.counts).map(([category, count]) => `${category}: ${count}`).join("，");
     const recent = store.list().filter((entry) => entry.status === "active").slice(-5)
         .map((entry) => `- ${entry.id} [${entry.category}] ${entry.text}`).join("\n");
-    return `记忆状态：原话 ${status.turns} 轮，待提炼 ${status.pending} 轮。\n活跃记忆：${counts}；待核实 ${status.needsCheck}，已解决 ${status.resolved}。\n上次提炼：${status.lastExtractedAt ?? "尚未提炼"}。\n最近的核心记忆：\n${recent || "暂无"}\n使用 /memory list 查看全部条目，/memory update 重新提炼和核对。`;
+    return `记忆状态：原话 ${status.turns} 轮，待提炼 ${status.pending} 轮。\n活跃记忆：${counts}；待核实 ${status.needsCheck}，已解决 ${status.resolved}。\n上次提炼：${status.lastExtractedAt ? formatAgentTime(status.lastExtractedAt) : "尚未提炼"}。\n最近的核心记忆：\n${recent || "暂无"}\n使用 /memory list 查看全部条目，/memory update 重新提炼和核对。`;
 }
 
 async function memoryCommand(text: string, store: MemoryStore, distiller: MemoryDistiller): Promise<string> {
@@ -32,7 +33,7 @@ async function memoryCommand(text: string, store: MemoryStore, distiller: Memory
     }
     if (action === "show") {
         const entry = store.get(parts[2] ?? "");
-        return entry ? JSON.stringify(entry, null, 2) : "找不到这条记忆。";
+        return entry ? JSON.stringify({...entry, updatedAt: formatAgentTime(entry.updatedAt)}, null, 2) : "找不到这条记忆。";
     }
     if (action === "forget") {
         if (!parts[2]) return "用法：/memory forget <ID>";
