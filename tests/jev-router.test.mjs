@@ -64,6 +64,22 @@ test("缺少密钥和超长消息不会发送请求或清空已有上下文", as
     assert.deepEqual(contextTurnIds(long, {}, recent), ["jev"]);
 });
 
+test("分类器收到完整的最近十轮和分界标记，不截掉句末的指代线索", async () => {
+    let sent;
+    const router = createTurnRouter({apiKey: "fixture-key", request: async (_url, options) => {
+        sent = JSON.parse(options.body).state.recentDialogue;
+        return Response.json(answer("task", "recall"));
+    }});
+    const turns = Array.from({length: 12}, (_, i) => ({messageId: `r${i}`, user: `消息 ${i}`, assistant: `答复 ${i}`}));
+    turns[2].user = "背景".repeat(700) + "任务对象 DOC-TAIL-731";
+    turns[2].assistant = "解释".repeat(900) + "等确认后执行";
+    await router("继续刚才的任务", {segmentStart: "r9"}, turns);
+    assert.equal(sent.length, 10);
+    assert.equal(sent[0].user, turns[2].user);
+    assert.equal(sent[0].assistant, turns[2].assistant);
+    assert.deepEqual(sent.map(turn => turn.segment), [...Array(7).fill("earlier"), ...Array(3).fill("current")]);
+});
+
 test("只发送当前段的线索，新话题用原话作名称，续聊不被短句覆盖", async () => {
     const requests = [];
     const router = createTurnRouter({apiKey: "fixture-key", request: async (_url, options) => {

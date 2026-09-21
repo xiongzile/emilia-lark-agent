@@ -1,9 +1,11 @@
 import {routing} from "../../support/route-fixture.mjs";
 
-// Explicit recall is classified by the request, not by whether its source is still recent.
-routing({name: "原任务已经不在最近三轮里，仍能识别恢复任务的意图", state: {
-    taskContext: {name: "我要创建 MR，标题 chore: routing demo。目标分支还没定，等我补充再创建。", messageIds: ["old-mr"]},
+// The earlier three-turn window hid this request; the ten-turn window includes it.
+routing({name: "任务移出最近三轮后，十轮窗口仍能识别恢复任务", state: {
+    segmentStart: "history-1",
+    taskContext: {name: "创建 MR", messageIds: ["history-0"]},
 }, history: [
+    {user: "我要创建 MR，标题 chore: routing demo。目标分支等我补充后再创建。", assistant: "等你提供目标分支。"},
     {user: "聊聊猫吧", assistant: "猫喜欢找暖和的地方待着。"},
     {user: "确实，我的猫最喜欢纸箱", assistant: "纸箱对猫来说很有安全感。"},
     {user: "它现在睡着了", assistant: "那就让它好好睡一觉。"},

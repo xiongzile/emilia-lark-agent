@@ -1,5 +1,5 @@
 import type {Agent, AgentMessage} from "@earendil-works/pi-agent-core";
-import {advanceConversation, contextTurnIds, turnGuidance, uncertainTurn, type TurnRouter} from "./conversation.ts";
+import {advanceConversation, contextTurnIds, startsNewSegment, turnGuidance, uncertainTurn, type TurnRouter} from "./conversation.ts";
 import {restoreTurn} from "./history.ts";
 import {MemoryDistiller} from "../memory/distill.ts";
 import {memoryCategories, type MemoryCategory, type MemoryStore} from "../memory/store.ts";
@@ -78,11 +78,11 @@ export class AgentSession {
                 this.turnMessages.clear();
             } else {
                 const recent = this.store.recentTurns(6, {from: state.segmentStart});
-                const route = await this.router(text, state, recent).catch(() => uncertainTurn());
-                const archived = route.history === "recall" && state.segmentStart
-                    ? this.store.recentTurns(6, {before: state.segmentStart}) : [];
+                const routingRecent = this.store.recentTurns(10);
+                const route = await this.router(text, state, routingRecent).catch(() => uncertainTurn());
+                const archived = route.history === "recall" ? routingRecent : [];
                 const ids = contextTurnIds(route, state, recent, archived);
-                const memoryScope = route.mode === "greet" ||
+                const memoryScope = startsNewSegment(route) ||
                     (state.segmentStart && route.mode === "chat" && route.history !== "recall") ? "personal" : "stable";
                 console.log("[Turn route]", {...route, topic: undefined, messageIds: ids});
                 const system = this.agent.state.messages[0];

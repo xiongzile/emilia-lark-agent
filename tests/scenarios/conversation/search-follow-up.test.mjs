@@ -13,6 +13,7 @@ conversation({
         calls: [{tool: "web_search", query: /jev/i}],
         noCalls: [{tool: "web_search", query: /^(?!.*jev).*$/i}],
         reply: /TypeSafe/i,
-        notReply: /没搜到|没有找到|先确认|拼写/,
+        // The subject and provider must be found; lacking extra third-party coverage is valid.
+        notReply: /先确认|拼写/,
     }}],
 });

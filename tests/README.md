@@ -27,6 +27,9 @@ results, and assertion failures. Reports and credentials stay local.
 | --- | --- |
 | `scenarios/routing/` | Real Jev decisions for greetings, mixed requests, technical chat, implicit references, archived-context recall and deferred tasks. No main-model reply can hide a classification failure. |
 | `scenarios/conversation/` | `agent/conversation.ts`, `session.ts`, `history.ts`: greeting boundaries across several turns and restart, implicit search subjects, acknowledgements, topic changes, paused tasks and router outages. |
+| `conversation/resume-task-reference`, `pronoun-target-correction`, `task-option-reference` | Restore an unnamed earlier task within ten turns after multiple topics/restart; resolve current and corrected document references; apply the latest first/second choice exactly once. |
+| `conversation/ambiguous-pronoun`, `continue-current-chat`, `topic-follow-up-outage` | Clarify which of two documents is meant; continue casual chat; preserve an implicit search subject during a router outage after restart. |
+| `conversation/single-target-pronoun`, `routing/agreed-task-cue` | Act on a uniquely identified target and honor an explicitly agreed continuation cue without asking the user to repeat information. |
 | `scenarios/memory/archived-time` | `src/time.ts` and `src/memory/store.ts`: archived timestamps override an earlier incorrect assistant answer. |
 | `scenarios/memory/remember-profile` | Memory extraction, JSON persistence, and `AgentSession` context restore a responsibility after restart. |
 | `scenarios/memory/ignore-small-talk` | The distiller avoids turning casual conversation into durable memory. |
@@ -37,7 +40,7 @@ results, and assertion failures. Reports and credentials stay local.
 | `scenarios/workspace/find-source-symbol` | The model calls `configured-cli` and the real C++ search binary to locate a source definition. |
 | `jev-router.test.mjs` | Offline provider errors, rate limits, timeout, malformed or uncertain answers, independent decisions and request boundaries. |
 | `memory.test.mjs` | Offline checks for storage, source provenance and timestamp rendering. |
-| `conversation.test.mjs`, `session-conversation.test.mjs` | Current-segment continuity, durable greeting boundaries, archived-context exclusion from both routing and responses, memory scope, and paired tool results while live. |
+| `conversation.test.mjs`, `session-conversation.test.mjs` | Current-segment continuity, durable topic boundaries, ten complete classifier exchanges, old-context exclusion from new-chat responses, memory scope, and paired tool results while live. |
 | `message-flow.test.mjs` | Offline message queuing, failed generation recovery, and streaming-card fallback. |
 | `native-search.test.mjs` | Offline search results, private-path exclusions, traversal rejection, and named workspace selection. |
 

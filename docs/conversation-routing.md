@@ -1,19 +1,19 @@
-# Conversation modes and greeting boundaries
+# Conversation modes and topic boundaries
 
 The first router (`1ad0689`) omitted history for one exact greeting, then brought
 all six recent exchanges back on the next message. An addressed greeting could
 also miss the rule. That made “晚上好呀爱蜜莉雅” / “今天过得怎么样” pick up old
 Jev discussions and comments about testing the assistant.
 
-The current design treats a greeting as a durable boundary in the conversation,
-not a one-turn instruction to ignore history.
+Greetings and resolved independent chats create a durable boundary in the
+conversation, rather than a one-turn instruction to ignore history.
 
 ## Modes
 
 | Mode | Meaning | Context behavior |
 | --- | --- | --- |
 | `greet` | A standalone greeting or farewell, including names and particles | No prior exchanges; a brief greeting without opening another topic. Starts a fresh segment. |
-| `chat` | Casual conversation, feelings, knowledge questions, technical discussion | Recent dialogue in the current segment and its topic references. |
+| `chat` | Casual conversation, feelings, knowledge questions, technical discussion | A resolved `new` starts a fresh segment; follow-ups keep the current segment and topic references. |
 | `task` | A request to query or act through tools, including supplying task parameters | Recent dialogue and applicable task references. |
 
 An independent `history` field distinguishes `new`, `current` and `recall`.
@@ -22,6 +22,17 @@ an old task does not. A greeting embedded in a substantive request is classified
 by that request. Thanks acknowledge the current exchange without resetting it.
 The modes select context and response guidance, not tool permissions or approval
 rules. All work still runs through the existing Pi tool loop.
+
+`startsNewSegment()` is shared by context selection, memory scope and saved state.
+An independent chat starts a segment only when both Jev decisions are usable;
+partial/uncertain answers do not discard recent context. The saved task is retained
+across topic changes. “Continue the earlier task” can restore it, while an unqualified
+“continue” follows the current conversation unless the user explicitly agreed it as a task confirmation. This distinction is tested with actual
+tool arguments, not just a fluent acknowledgement.
+
+Follow-ups include both chat and task sources from the current segment: a tool
+request can depend on an object or correction first introduced in chat. Switching
+mode must not silently lose that evidence. Archived sources still require recall.
 
 ## Jev classification
 
@@ -37,8 +48,8 @@ extra DeepSeek call to summarize or label a turn.
 
 Each classification is used independently. Below confidence 0.5, or when Jev
 chooses `uncertain`, that field falls back to chat/current. A confident recall
-request remains usable even when chat versus task is uncertain. Uncertainty also
-keeps both active topic/task references; it never activates pre-greeting sources
+request remains usable even when chat versus task is uncertain. A current-history fallback
+keeps both active topic/task references; it never activates archived sources
 without a recall decision. A greeting requires a consistent new-history decision
 before moving the boundary. Confidence is a distribution statistic, not a measured
 probability of correctness; the threshold is an application choice.
@@ -52,26 +63,28 @@ steps. No per-message relevance filter or second classifier is introduced.
 
 1. Archive the user's message and load `ConversationState`.
 2. Fetch up to six exchanges starting at `segmentStart`.
-3. Route using the current message, the last three of those exchanges, and topic
-   names belonging to this segment. Archived task names are excluded even from
-   the classifier, so they cannot turn an ordinary acknowledgement into approval.
-4. Assemble the main model's context. Only `recall` adds the six exchanges before
-   the boundary and saved topic/task sources. A greeting itself gets no exchanges
-   and no current-time block. Ordinary chat after a greeting does not receive old
-   project/decision memory automatically; profile and preferences remain available.
+3. Route using the current message and the last ten complete exchanges, including
+   exchanges before the boundary. Each is marked `current` or `earlier`; the original
+   user/assistant text is not clipped. Active topic names still belong to the current
+   segment. Seeing an earlier task is not permission to resume it.
+4. Assemble the main model's context separately. Only `recall` adds the ten exchanges
+   visible to the classifier and saved topic/task sources. A greeting or resolved new chat gets
+   no earlier exchanges and only profile/preference memory. Later ordinary chat
+   stays within that segment. A greeting also omits the current-time block.
 5. Run Pi with per-turn system guidance. The user's actual request takes precedence
    if classification was mistaken. Reply through the existing streaming path.
-6. Save the final reply and updated state together. A greeting moves `segmentStart`
-   to its message ID. Each topic/task reference records which segment activated it.
+6. Save the final reply and updated state together. A greeting or resolved new chat
+   moves `segmentStart` to its message ID. Each topic/task reference records which
+   segment activated it; a new chat does not replace the archived task reference.
 
-The archive is never deleted by a greeting. Explicit recall can bring the old
+The archive is never deleted by a topic boundary. Explicit recall can bring the old
 sources into the new segment; later follow-ups can then use them. Current-segment
-exchanges remain available even if a normal chat/task classification is wrong.
+exchanges remain available for follow-ups and uncertain classifications.
 A router error, invalid JSON, or three-second timeout preserves the current
 segment and its active references, without reviving archived context.
 
 State is an optional field in `.private/memory/transcript.json`. Existing files
-without a boundary retain their previous continuity until the next greeting.
+without a boundary retain their previous continuity until a greeting or resolved new chat.
 Each topic/task reference retains at most four message IDs: the first and latest
 three. Live source groups preserve paired tool calls/results. After restart,
 archived wording is restored with timestamps and an unverified-assistant label;
@@ -81,9 +94,10 @@ and mark the external outcome unknown.
 ## Tests and limits
 
 Offline tests inspect what the model actually receives: old transcript and project
-memory are absent after a greeting, the boundary survives restart and router
-failure, and explicit recall restores the sources. A separate check verifies that
-the router itself does not receive archived task names.
+memory are absent after a new segment, the boundary survives restart and router
+failure, and explicit recall restores the sources. Separate checks verify the
+classifier's ten-turn limit, full text and segment labels. Giving the classifier
+more context does not automatically add that context to the main model's request.
 
 Real-model scenarios include:
 
@@ -95,21 +109,67 @@ Real-model scenarios include:
   confirmation prompt.
 - A greeting containing a real Git request, implicit web-search subjects, current
   chat choices, router outages, memory corrections, and existing task permissions.
+- Several independent topics followed by generic task resumption within ten turns
+  and after restart; the original document ID and title must reach exactly one write call.
+- Current-document pronouns, explicit corrections back to an older document,
+  first/second task choices, ambiguous targets and continuation of casual chat.
 
 Evaluations call Jev and the configured DeepSeek model. External writes and search
 responses are simulated; local Git/file operations use disposable repositories.
 They do not send Feishu messages or modify real business resources. Failures are
 kept in reports and return a nonzero exit code.
 
-Classification is probabilistic: a real request misclassified as a greeting can
-lose immediate context for that reply, though its archive is retained. Greeting
+Classification is probabilistic: a dependent request confidently misclassified as
+a new chat or greeting can lose immediate context, though its archive is retained. Greeting
 wording also remains generated, not a fixed template. The architecture enforces
-the saved boundary once a greeting is recognized; it cannot guarantee every
-intent or sentence. Casual chat without a greeting keeps its recent segment and
-can still mention irrelevant details. One chat topic and one task reference are
+the saved boundary once a new segment is recognized; it cannot guarantee every
+intent or sentence. Uncertain routing keeps recent context and can still expose
+irrelevant details. One chat topic and one task reference are
 kept; older, unreferenced details require the existing memory tool.
+Reliable resolution of an unnamed task beyond the ten-turn window is not a target
+of this revision. Existing named-task references remain available without adding a
+new retrieval layer or another classifier.
 
-## Jev replacement validation
+## Topic-boundary and ten-turn validation
+
+The repeated baseline investigation on `ff9a091` found old-work leakage in 8/10
+casual-after-work runs despite correct routing. A paired context ablation removed
+that leakage in 10/10 runs. This revision therefore changes context assembly,
+not just the wording of the classifier criteria.
+
+- Offline checks: **33/33 passed**, including the actual main-model payload,
+  restart, uncertain decisions and full ten-turn classifier input.
+- Full real-model run: **31/33 conversations** and **39/40 classifier decisions**
+  passed. The two conversation failures were unnecessary questions in greetings;
+  their later recall/restart checks passed. One new deferred task fell back to
+  `current` at history confidence 0.49; task mode and source retention were intact.
+  The evaluation correctly exited with failure. Greeting assertions remain active.
+- A fixed five-round run of ten critical conversations produced **48/50 complete
+  passes**. Every round passed the target, argument and call-count checks for
+  pronouns, task resumption, corrections, ambiguous targets, chat continuation,
+  router outage and project mapping. Neither failure was a lost search subject:
+  both searches included Jev and identified TypeSafe, then said no extra third-party
+  coverage was found. A blanket ban on “没搜到” incorrectly failed those answers.
+  The search case now checks the actual subject/provider and still rejects asking
+  for spelling/confirmation. Original reports remain unchanged.
+- A production-config smoke check used the real local persona and eight tool
+  declarations, with execution disabled. New casual chat and its follow-up both
+  excluded the old task from the model request; neither attempted a tool.
+
+Two scenario definitions were also corrected during development: one unique
+pending document is a valid referent for “改它吧”, while two unspecified documents
+require clarification; an explicit “say continue to execute” agreement is different
+from an unqualified request to continue chatting. Positive and negative scenarios
+now cover both, rather than teaching the assistant to ask unnecessary questions.
+
+Reports are retained locally under `.private/test-runs/topic-boundary/` after
+release: `topic-full-final.log`, `topic-offline-3.log`, `topic-repeat-progress.log`
+and `topic-repeat-1790012909955/results.json`, together with earlier failed runs.
+The production smoke result is `.private/test-runs/topic-production-smoke.json`.
+These small samples show an improvement and no observed operation regression;
+they do not establish deterministic classification or greeting quality.
+
+## Previous Jev replacement validation (`ff9a091`)
 
 - Offline checks: **30/30 passed**, including provider failure and independent
   handling of uncertain mode/history answers.

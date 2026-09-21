@@ -5,7 +5,7 @@ import {join} from "node:path";
 import {test} from "node:test";
 import {AgentSession} from "../dist/agent/session.js";
 import {MemoryStore} from "../dist/memory/store.js";
-import {uncertainTurn} from "../dist/agent/conversation.js";
+import {uncertainTurn, advanceConversation} from "../dist/agent/conversation.js";
 
 // Session orchestration: preserve actual tool evidence, not an invented summary.
 test("暂停、窗口过期和重启不丢任务来源，存活会话保留完整工具结果", async () => {
@@ -45,6 +45,52 @@ test("暂停、窗口过期和重启不丢任务来源，存活会话保留完�
         assert.match(JSON.stringify(requests.at(-1)), /查文档/);
         assert.match(JSON.stringify(requests.at(-1)), /历史助手回复.*未核验/);
         assert.equal(requests.at(-1).some(m => m.role === "toolResult"), false);
+    } finally {await rm(directory, {recursive: true, force: true});}
+});
+
+test("新闲聊持久隔离旧任务和项目记忆，多次换话题及重启后仍可恢复原任务", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "emilia-new-topic-"));
+    const route = (mode, history) => ({...uncertainTurn(), source: "jev", mode, history, topic: "当前话题"});
+    try {
+        let store = await MemoryStore.open(directory);
+        await store.recordUser("work", "准备修改 DOC-731，标题改为周报，等待确认。");
+        await store.recordAssistant("work", "等待确认。", advanceConversation({}, route("task", "new"), "work"));
+        await store.apply([{operation: "upsert", category: "project", text: "工作文档 DOC-731", sourceMessageIds: ["work"]}], 1);
+        const requests = [];
+        const agent = {
+            state: {model: {api: "test", provider: "test", id: "test"}, messages: [{role: "system", content: "persona"}]},
+            async prompt(message) {
+                requests.push(structuredClone(this.state.messages));
+                this.state.messages.push(message, {role: "assistant", content: [{type: "text", text: "好呀"}]});
+            },
+        };
+        let selected = route("chat", "new");
+        let session = new AgentSession(agent, store, {schedule() {}}, async () => selected);
+        await session.run("rest", "忙了一天，终于能躺会儿了");
+        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /DOC-731|等待确认/);
+        assert.equal(store.conversation().segmentStart, "rest");
+        assert.equal(store.conversation().currentTopic.segmentStart, "rest");
+        assert.deepEqual(store.conversation().taskContext.messageIds, ["work"]);
+        selected = route("chat", "current");
+        await session.run("follow", "就是想随便聊聊");
+        assert.match(JSON.stringify(requests.at(-1)), /终于能躺/);
+        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /DOC-731|等待确认/);
+        selected = route("chat", "new");
+        await session.run("science", "为什么天空是蓝色的？");
+        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /DOC-731|终于能躺/);
+        for (let i = 0; i < 8; i++) {await store.recordUser(`chat-${i}`, "闲聊"); await store.recordAssistant(`chat-${i}`, "好呀");}
+        store = await MemoryStore.open(directory);
+        selected = uncertainTurn();
+        session = new AgentSession(agent, store, {schedule() {}}, async () => selected);
+        await session.run("outage", "然后呢");
+        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /DOC-731|等待确认/);
+        selected = route("task", "recall");
+        await session.run("resume", "继续刚才的任务，执行吧");
+        assert.match(JSON.stringify(requests.at(-1)), /准备修改 DOC-731，标题改为周报/);
+        assert.equal(store.conversation().taskContext.segmentStart, "science");
+        selected = route("task", "current");
+        await session.run("pronoun", "它现在叫什么？");
+        assert.match(JSON.stringify(requests.at(-1)), /DOC-731/);
     } finally {await rm(directory, {recursive: true, force: true});}
 });
 

@@ -4,8 +4,11 @@ import {uncertainTurn, contextTurnIds, advanceConversation} from "../dist/agent/
 
 const route = (mode, history = "current", topic = "") => ({...uncertainTurn(), source: "jev", mode, history, topic});
 
-test("误判为新聊天也不会删掉当前对话中的搜索对象", () => {
-    assert.deepEqual(contextTurnIds(route("chat", "new"), {}, [{messageId: "jev"}]), ["jev"]);
+test("明确的新聊天隔离旧工作，不确定的新聊天仍保留追问对象", () => {
+    assert.deepEqual(contextTurnIds(route("chat", "new"), {}, [{messageId: "jev"}]), []);
+    const ambiguous = {...route("chat", "new"), reason: "uncertain_mode"};
+    assert.deepEqual(contextTurnIds(ambiguous, {}, [{messageId: "jev"}]), ["jev"]);
+    assert.equal(advanceConversation({}, ambiguous, "question").segmentStart, undefined);
 });
 
 test("问候归档旧话题和任务，明确恢复后才能在当前段延续旧出处", () => {
@@ -28,4 +31,10 @@ test("任一判断不确定时保留当前段的两类出处，仍不越过问�
     const partial = {...route("task"), reason: "uncertain_history"};
     assert.deepEqual(contextTurnIds(partial, state, []), ["task-misclassified-as-chat"]);
     assert.deepEqual(contextTurnIds(partial, {...state, segmentStart: "hello"}, []), []);
+});
+
+test("聊天中确定的对象也能供后续工具请求使用，不混入上一段的任务", () => {
+    const state = {segmentStart: "alias", currentTopic: {name: "pi 是 agent 仓库", messageIds: ["alias", "correction"], segmentStart: "alias"},
+        taskContext: {name: "旧文档", messageIds: ["old-task"]}};
+    assert.deepEqual(contextTurnIds(route("task", "current"), state, [{messageId: "latest"}]), ["latest", "alias", "correction"]);
 });
