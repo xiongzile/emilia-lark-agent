@@ -13,16 +13,19 @@ pnpm eval:agent tests/scenarios/memory                       # One feature
 pnpm eval:agent tests/scenarios/workspace/find-source-symbol.test.mjs
 ```
 
-Real-model cases require `DEEPSEEK_API_KEY` in the environment or `.env` and use
-the configured `DEEPSEEK_MODEL`. They run serially in separate Node processes,
-each with fresh temporary Git repositories, config, and memory. Each case has a
-five-minute timeout. Reports under `.private/test-runs/` keep the dialogue,
-tool calls, results, and assertion failure. Reports and credentials stay local.
+Real-model conversations require `DEEPSEEK_API_KEY` and `JEV_API_KEY` in the environment
+or `.env` and use the configured `DEEPSEEK_MODEL` plus pinned `jev-1.13.0`.
+Classifier-only cases under `scenarios/routing/` require only the Jev credential.
+Test files run serially in separate Node processes. Conversations use fresh
+temporary Git repositories, config, and memory. Each file has a five-minute
+timeout. Reports under `.private/test-runs/` keep the dialogue, tool calls,
+results, and assertion failures. Reports and credentials stay local.
 
 ## Feature map
 
 | Cases | Implemented behavior |
 | --- | --- |
+| `scenarios/routing/` | Real Jev decisions for greetings, mixed requests, technical chat, implicit references, archived-context recall and deferred tasks. No main-model reply can hide a classification failure. |
 | `scenarios/conversation/` | `agent/conversation.ts`, `session.ts`, `history.ts`: greeting boundaries across several turns and restart, implicit search subjects, acknowledgements, topic changes, paused tasks and router outages. |
 | `scenarios/memory/archived-time` | `src/time.ts` and `src/memory/store.ts`: archived timestamps override an earlier incorrect assistant answer. |
 | `scenarios/memory/remember-profile` | Memory extraction, JSON persistence, and `AgentSession` context restore a responsibility after restart. |
@@ -32,6 +35,7 @@ tool calls, results, and assertion failure. Reports and credentials stay local.
 | `scenarios/task-execution/` | `src/prompts/emilia.ts`: act on a confirmed request, respect the requested identity, report permission denial, and clarify missing information. External CLI responses are simulated. |
 | `scenarios/workspace/correct-file-target` | User correction redirects `workspace_files`; assertions inspect both repositories' actual files. |
 | `scenarios/workspace/find-source-symbol` | The model calls `configured-cli` and the real C++ search binary to locate a source definition. |
+| `jev-router.test.mjs` | Offline provider errors, rate limits, timeout, malformed or uncertain answers, independent decisions and request boundaries. |
 | `memory.test.mjs` | Offline checks for storage, source provenance and timestamp rendering. |
 | `conversation.test.mjs`, `session-conversation.test.mjs` | Current-segment continuity, durable greeting boundaries, archived-context exclusion from both routing and responses, memory scope, and paired tool results while live. |
 | `message-flow.test.mjs` | Offline message queuing, failed generation recovery, and streaming-card fallback. |
@@ -46,9 +50,12 @@ real local tools (`memory`, `git`, `files`, `search`) or explicit mock commands.
 
 The `events` array reads chronologically. Each event sends a `user` message,
 triggers `distill`, simulates `restart`, or ages out recent dialogue with
-`ageRecentTurns`. Its `expect` checks the reply, tool calls, saved memory, or
+`ageRecentTurns`. An event with `routerUnavailable: true/false` toggles a provider outage during the conversation. Its `expect` checks the reply, tool calls, saved memory, or
 actual files. Check mutations with exact arguments and `count: 1`; a fluent
 success message alone is not evidence of execution. Unknown mock commands fail.
+Expectation failures are recorded and the scripted conversation continues, so
+a wording failure cannot hide a later wrong operation or broken context recovery.
+Any failed expectation still fails the case; runtime errors stop it immediately.
 
 Read [remember-profile](scenarios/memory/remember-profile.test.mjs) for a short
 conversation and [confirmed-cancellation](scenarios/task-execution/confirmed-cancellation.test.mjs)
@@ -65,3 +72,8 @@ corrective instructions to a bad query. Conversation reports include the route,
 its latency, and the state saved after each reply.
 
 See [the design and evaluation report](../docs/conversation-routing.md) for current checks and the earlier comparison. Greeting cases assert the full exchange, not just a router label. `greeting-does-not-confirm-task` checks that “好” after a greeting cannot approve an old deletion request. All assertions remain active; a failed run is retained rather than silently retried.
+
+Classifier-only examples use `routing({name, history, state, cases})` from
+`support/route-fixture.mjs`. Each case names a user message and the expected mode
+and history relation. They call the production router, require a real provider
+result, and save every decision and latency in a local JSON report.

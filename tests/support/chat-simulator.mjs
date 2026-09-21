@@ -36,9 +36,6 @@ function matchesCall(call, expected) {
 
 async function checkExpect(expect, {reply, calls, store, workspaces}) {
     if (!expect) return;
-    if (expect.reply) assert.match(reply, expect.reply);
-    if (expect.notReply) assert.doesNotMatch(reply, expect.notReply);
-
     for (const expected of expect.calls ?? []) {
         const count = calls.filter((call) => matchesCall(call, expected)).length;
         if (expected.count === undefined) {
@@ -67,6 +64,8 @@ async function checkExpect(expect, {reply, calls, store, workspaces}) {
         if (expected.contains) assert.match(content, expected.contains);
         if (expected.notContains) assert.doesNotMatch(content, expected.notContains);
     }
+    if (expect.reply) assert.match(reply, expect.reply);
+    if (expect.notReply) assert.doesNotMatch(reply, expect.notReply);
 }
 
 export function createChatSimulator({fixture, workspaces, MemoryStore, createDeepSeekAgent, AgentSession, toolRegistry}) {
@@ -87,11 +86,13 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
         let store = await MemoryStore.open(directory);
         let session;
         let distiller;
+        let routingUnavailable = routerUnavailable;
         const timeline = history.flatMap(({user, assistant, at}) => [
             {type: "user", text: user, at},
             {type: "assistant", text: assistant},
         ]);
         const calls = [];
+        const failures = [];
 
         function start() {
             const resolvedTools = tools.map((tool) =>
@@ -100,7 +101,7 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
             const runtime = createDeepSeekAgent(store, resolvedTools);
             distiller = runtime.distiller;
             session = new AgentSession(runtime.agent, store, distiller, async (...args) => {
-                if (routerUnavailable) throw new Error("simulated router outage");
+                if (routingUnavailable) throw new Error("simulated router outage");
                 const route = await runtime.router(...args);
                 timeline.push({type: "route", ...route});
                 return route;
@@ -127,6 +128,9 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
                     reply = await session.run(event.id ?? `turn-${index + 1}`, event.user);
                     timeline.push({type: "assistant", text: reply});
                     timeline.push({type: "conversation_state", ...store.conversation()});
+                } else if (event.routerUnavailable !== undefined) {
+                    routingUnavailable = event.routerUnavailable;
+                    timeline.push({type: "router_availability", unavailable: routingUnavailable});
                 } else if (event.distill) {
                     const changes = await distiller.update();
                     timeline.push({type: "distill", changes});
@@ -146,8 +150,16 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
                 } else {
                     throw new Error(`Unknown conversation event: ${JSON.stringify(event)}`);
                 }
-                await checkExpect(event.expect, {reply, calls: calls.slice(before), store, workspaces});
+                try {
+                    await checkExpect(event.expect, {reply, calls: calls.slice(before), store, workspaces});
+                } catch (error) {
+                    // Finish the scripted conversation so wording failures do not hide
+                    // later context recovery or tool behavior. Every failure still fails the test.
+                    failures.push(error);
+                    timeline.push({type: "expectation_failure", event: index + 1, message: error.message});
+                }
             }
+            if (failures.length) throw new AggregateError(failures, `${failures.length} conversation expectation(s) failed`);
         } catch (error) {
             error.timeline = timeline;
             throw error;

@@ -23,6 +23,31 @@ by that request. Thanks acknowledge the current exchange without resetting it.
 The modes select context and response guidance, not tool permissions or approval
 rules. All work still runs through the existing Pi tool loop.
 
+## Jev classification
+
+Semantic routing uses pinned `jev-1.13.0` with two independent `Choice` questions,
+`mode` and `history`, in a single HTTP request. Exact standalone greetings and
+thanks keep their existing local fast path. See TypeSafe's [Choice documentation](https://docs.typesafe.ai/primitives/choice)
+and [confidence semantics](https://docs.typesafe.ai/confidence).
+
+Jev does not generate a topic name. The code retains the existing source label
+when continuing and uses up to 160 characters of the user's wording for a new
+label. Original message IDs remain the source of actual parameters. There is no
+extra DeepSeek call to summarize or label a turn.
+
+Each classification is used independently. Below confidence 0.5, or when Jev
+chooses `uncertain`, that field falls back to chat/current. A confident recall
+request remains usable even when chat versus task is uncertain. Uncertainty also
+keeps both active topic/task references; it never activates pre-greeting sources
+without a recall decision. A greeting requires a consistent new-history decision
+before moving the boundary. Confidence is a distribution statistic, not a measured
+probability of correctness; the threshold is an application choice.
+
+Missing credentials, invalid responses, HTTP errors or the three-second deadline
+use the existing current-segment fallback. Errors are logged as short reasons,
+without provider bodies or credentials. These do not become new user approval
+steps. No per-message relevance filter or second classifier is introduced.
+
 ## Request flow
 
 1. Archive the user's message and load `ConversationState`.
@@ -71,7 +96,7 @@ Real-model scenarios include:
 - A greeting containing a real Git request, implicit web-search subjects, current
   chat choices, router outages, memory corrections, and existing task permissions.
 
-Evaluations call the configured DeepSeek model. External writes and search
+Evaluations call Jev and the configured DeepSeek model. External writes and search
 responses are simulated; local Git/file operations use disposable repositories.
 They do not send Feishu messages or modify real business resources. Failures are
 kept in reports and return a nonzero exit code.
@@ -84,7 +109,42 @@ intent or sentence. Casual chat without a greeting keeps its recent segment and
 can still mention irrelevant details. One chat topic and one task reference are
 kept; older, unreferenced details require the existing memory tool.
 
-## Validation of this revision
+## Jev replacement validation
+
+- Offline checks: **30/30 passed**, including provider failure and independent
+  handling of uncertain mode/history answers.
+- Classifier-only evaluation: **26/26 passed** across eight scenario files. The
+  measured median was **419 ms**, with **1,051 ms p95**, including a fresh connection
+  in each file. This is a small local sample, not a latency guarantee.
+- Full conversations: **22/26 passed**. Four wording failures remain: an unnecessary
+  question in two greeting scenarios, and an old-work reference in two ordinary
+  chats without a greeting. Every scenario ran to its end; all later recall,
+  restart, operation-argument and call-count assertions passed. No expectation
+  was removed, and the evaluation correctly exited with a failure status.
+- A production-configuration smoke check used the local persona and eight tool
+  declarations, with execution disabled. Both requests excluded the archived
+  test record, and no tool was attempted. The greeting added a question. One
+  comparison run on `a4228a3` with its original DeepSeek classifier produced the
+  same greeting question; its context checks also passed. Jev classifies the turn
+  but does not control the main model's exact wording.
+
+Earlier candidate runs exposed two actual routing issues: treating mode/history
+confidence together discarded valid recall, and ambiguous classification omitted
+the source of a deferred task outside the recent window. Independent decisions,
+preserving both active references under uncertainty, and clearer task criteria
+address these; deferred work and out-of-window resumption now have dedicated cases.
+An implicit web search also fell below the mode confidence floor; task criteria
+now explicitly include read-only lookups. The floor was not lowered to pass it.
+
+The final full run is `jev-verification.log`; offline output is `jev-checks.log`.
+Deployment retains these and the earlier failed reports under
+`.private/test-runs/jev-turn-router/`. Production/baseline smoke reports are
+`jev-production-smoke.json` and `jev-baseline-smoke.json` in the main checkout's
+`.private/test-runs/`. These results support replacing the classifier without an
+observed business-operation regression; they do not establish perfect conversation
+quality. The remaining wording assertions stay active for future improvements.
+
+## Previous greeting-boundary validation (`a4228a3`)
 
 - Offline checks: **21/21 passed**.
 - Full real-model run: **22/23 passed**. All greeting-boundary scenarios and all

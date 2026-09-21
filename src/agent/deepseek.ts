@@ -97,5 +97,5 @@ export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[]) {
         }
     });
 
-    return {agent, distiller: new MemoryDistiller(memory, models, model), router: createTurnRouter(models, model)};
+    return {agent, distiller: new MemoryDistiller(memory, models, model), router: createTurnRouter()};
 }

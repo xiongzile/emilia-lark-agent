@@ -28,6 +28,9 @@ export function conversation(script) {
         if (!process.env.DEEPSEEK_API_KEY) {
             throw new Error("DEEPSEEK_API_KEY is required for the real-model agent evaluation");
         }
+        if (!script.routerUnavailable && !(process.env.JEV_API_KEY || process.env.TYPESAFE_API_KEY)) {
+            throw new Error("JEV_API_KEY is required to evaluate the real turn router");
+        }
         const previousDirectory = process.cwd();
         const previousConfig = process.env.AGENT_LOCAL_CONFIG;
         const fixture = await mkdtemp(join(tmpdir(), "emilia-agent-eval-"));

@@ -27,7 +27,7 @@ test("暂停、窗口过期和重启不丢任务来源，存活会话保留完�
         };
         const router = async text => text === "你好"
             ? {...uncertainTurn(), source: "rule", mode: "greet", history: "new"}
-            : {...uncertainTurn(), source: "model", mode: "task", topic: "文档", history: text === "查文档" ? "new" : "recall"};
+            : {...uncertainTurn(), source: "jev", mode: "task", topic: "文档", history: text === "查文档" ? "new" : "recall"};
         let session = new AgentSession(agent, store, {schedule() {}}, router);
         await session.run("work", "查文档");
         await session.run("hello", "你好");
@@ -93,7 +93,7 @@ test("带称呼的问候建立持久边界，重启和路由故障都不会把�
             },
         };
         let session = new AgentSession(agent, store, {schedule() {}}, async () => ({
-            ...uncertainTurn(), source: "model", mode: "greet", history: "new",
+            ...uncertainTurn(), source: "jev", mode: "greet", history: "new",
         }));
         await session.run("hello", "晚上好呀爱蜜莉雅");
         assert.doesNotMatch(JSON.stringify(requests.at(-1)), /Jev|DEMO-482|35/);
@@ -105,7 +105,7 @@ test("带称呼的问候建立持久边界，重启和路由故障都不会把�
         assert.doesNotMatch(JSON.stringify(requests.at(-1)), /Jev|DEMO-482|35/);
         assert.equal(store.turnsById(["old"]).length, 1);
         session = new AgentSession(agent, store, {schedule() {}}, async () => ({
-            ...uncertainTurn(), source: "model", mode: "chat", history: "recall", topic: "Jev",
+            ...uncertainTurn(), source: "jev", mode: "chat", history: "recall", topic: "Jev",
         }));
         await session.run("recall", "昨天那个 Jev，我们说到哪了？");
         assert.match(JSON.stringify(requests.at(-1)), /Jev/);

@@ -19,7 +19,7 @@ Conversation routing distinguishes greetings, conversation (including technical 
 
 This is still a single-process, single-user demo: one Agent handles messages sequentially. Only text messages are handled. Web search returns excerpts rather than full-page verification.
 
-Memory lives in `.private/memory/transcript.json` and `.private/memory/memories.json`, outside Git. Timestamps stay in UTC on disk and are shown to the agent in Beijing time with an explicit offset. The runtime keeps six recent exchanges within the current dialogue segment, plus durable source references for the current topic and most recent task. A small router selects `greet`, `chat`, or `task`; greetings with names or conversational particles use semantic classification. Greeting boundaries survive restart. Ordinary follow-ups and routing failures do not automatically restore pre-greeting history. Greetings and subsequent casual chat receive only profile/preference memory by default; work and explicit recall can also receive stable project facts and decisions. Progress and open issues remain available through the memory tool. After replies, a separate DeepSeek call extracts durable facts when the chat is idle for 30 seconds, after five pending turns, or immediately after an explicit “remember” request. Failed extraction leaves the original dialogue available for retry. The `memory` tool searches curated facts first and can search archived wording when the agent needs older detail.
+Memory lives in `.private/memory/transcript.json` and `.private/memory/memories.json`, outside Git. Timestamps stay in UTC on disk and are shown to the agent in Beijing time with an explicit offset. The runtime keeps six recent exchanges within the current dialogue segment, plus durable source references for the current topic and most recent task. Jev classifies `greet`, `chat`, or `task` and the relation to earlier dialogue in one request; greetings with names or conversational particles use semantic classification. Greeting boundaries survive restart. Ordinary follow-ups and routing failures do not automatically restore pre-greeting history. Greetings and subsequent casual chat receive only profile/preference memory by default; work and explicit recall can also receive stable project facts and decisions. Progress and open issues remain available through the memory tool. After replies, a separate DeepSeek call extracts durable facts when the chat is idle for 30 seconds, after five pending turns, or immediately after an explicit “remember” request. Failed extraction leaves the original dialogue available for retry. The `memory` tool searches curated facts first and can search archived wording when the agent needs older detail.
 
 Send `/memory` for counts and extraction status, `/memory list [category]` to inspect facts, `/memory show <id>` for provenance, `/memory update` to process pending dialogue and compare facts with recent chat, or `/memory forget <id>` to remove a fact. The update command does not claim to verify external repositories or Lark resources it has not inspected. The original transcript remains after forgetting a fact. These JSON files contain private conversation text; keep the `.private/` directory local.
 
@@ -31,6 +31,7 @@ Send `/memory` for counts and extraction status, `/memory list [category]` to in
 - Git submodules initialized (`git clone --recurse-submodules` or `git submodule update --init --recursive`)
 - A Lark/Feishu custom app with long-connection event delivery enabled
 - A DeepSeek API key
+- A TypeSafe/Jev API key for semantic turn routing
 - `lark-cli` if the agent should operate Lark resources
 - A Tavily API key if the agent should search the public web
 
@@ -38,7 +39,7 @@ Send `/memory` for counts and extraction status, `/memory list [category]` to in
 
 ```sh
 cp .env.example .env
-# Fill in FEISHU_APP_ID, FEISHU_APP_SECRET, and DEEPSEEK_API_KEY.
+# Fill in FEISHU_APP_ID, FEISHU_APP_SECRET, DEEPSEEK_API_KEY, and JEV_API_KEY.
 git submodule update --init --recursive
 pnpm build:pi
 pnpm install
@@ -50,6 +51,7 @@ pnpm start
 
 Subscribe the app to `im.message.receive_v1` and grant only the permissions required by the operations you want the bot to perform.
 The default model is `deepseek-flash`; override it with `DEEPSEEK_MODEL` if the pinned Pi catalog exposes another model ID.
+Set `JEV_API_KEY` in the ignored `.env` for turn classification (the `TYPESAFE_API_KEY` alias also works). The router sends the current message, up to three exchanges from the current segment, and active topic clues to TypeSafe. It pins `jev-1.13.0`; DeepSeek still handles replies, tools, and memory distillation. Missing credentials, provider errors, and uncertain answers preserve current context. No extra SDK is required.
 Set `TAVILY_API_KEY` in the ignored `.env` to enable the `web_search` tool. Search queries are sent to Tavily; keep private documents and internal code out of them. The tool returns up to five short excerpts and URLs for attribution. Without the key, the agent continues to run without web search.
 
 Pi source is pinned as the `vendor/pi` submodule. The two Pi dependencies link to that source, so edits under `vendor/pi/packages/agent` or `vendor/pi/packages/ai` can be rebuilt with `pnpm build:pi` and debugged in place. To update Pi, run `git submodule update --remote vendor/pi`, rebuild and verify the agent, then commit the new submodule pointer. An update to the upstream `main` branch does not silently change an existing checkout.
@@ -60,13 +62,11 @@ Tests must catch a real user-facing failure and read like the conversation they 
 
 `pnpm test` builds the C++ search tool and runs offline checks for its workspace boundaries, memory persistence, and the message flow, including routing failures, task-state persistence, paired tool-result continuity, a failed streaming card and an interrupted generation followed by another message. No Feishu app or API key is needed.
 
-`pnpm eval:agent` calls DeepSeek using `DEEPSEEK_API_KEY` from the environment or local `.env`. Conversation cases live in `tests/scenarios/`, grouped by conversation, memory, task execution, and workspace tools. Each file covers one behavior and identifies the implementation it exercises. The Node test runner handles discovery, process isolation, and failures; shared helpers handle temporary workspaces and the conversation timeline.
+`pnpm eval:agent` calls Jev and DeepSeek using `JEV_API_KEY` and `DEEPSEEK_API_KEY` from the environment or local `.env`. Classifier-only cases in `tests/scenarios/routing/` require only the Jev key. Conversation cases live in `tests/scenarios/`, grouped by conversation, memory, task execution, and workspace tools. Each file covers one behavior and identifies the implementation it exercises. The Node test runner handles discovery, process isolation, and failures; shared helpers handle temporary workspaces and the conversation timeline.
 
 Run a feature with `pnpm eval:agent tests/scenarios/memory`, or pass one `.test.mjs` file. See [the test guide](tests/README.md) for the feature map and how to add a conversation.
 
 These evaluations check saved memory, actual temporary-file contents, and tool arguments and call counts. External service commands are simulated: no Feishu message is sent and no configured user workspace is modified. Each case saves an ordered conversation/tool report under `.private/test-runs/` and returns a nonzero exit code on failure. Model evaluations can vary between runs and consume API tokens.
-
-TODO: Consider Jev for tool routing or high-volume classification only when measured task success, latency, and cost show a benefit over the current DeepSeek flow.
 
 ## Private extensions
 
