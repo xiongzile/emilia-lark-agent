@@ -24,7 +24,8 @@ async function createRepo(path, marker) {
 // One conversation per test file. Node isolates files in separate processes,
 // so the runtime's cached config and cwd cannot leak between conversations.
 export function conversation(script) {
-    test(script.name, async () => {
+    const hasJev = Boolean(process.env.JEV_API_KEY || process.env.TYPESAFE_API_KEY) && process.env.AGENT_CONTEXT_SELECTION !== "off";
+    test(script.name, {skip: script.requiresJev && !hasJev ? "JEV_API_KEY is required for context-selection conversations" : false}, async () => {
         if (!process.env.DEEPSEEK_API_KEY) {
             throw new Error("DEEPSEEK_API_KEY is required for the real-model agent evaluation");
         }
@@ -47,7 +48,7 @@ export function conversation(script) {
             process.chdir(workspaces.agent);
 
             // Import only after selecting the fixture: config is loaded at module scope.
-            const [{MemoryStore}, {createDeepSeekAgent}, {AgentSession}, {createMemoryTool}, {workspaceGitTool}, {workspaceFilesTool}, {createConfiguredCliTools}] = await Promise.all([
+            const [{MemoryStore}, {createDeepSeekAgent}, {AgentSession}, {createMemoryTool}, {workspaceGitTool}, {workspaceFilesTool}, {createConfiguredCliTools}, {createContextSelector}] = await Promise.all([
                 import("../../dist/memory/store.js"),
                 import("../../dist/agent/deepseek.js"),
                 import("../../dist/agent/session.js"),
@@ -55,6 +56,7 @@ export function conversation(script) {
                 import("../../dist/tools/workspace-git.js"),
                 import("../../dist/tools/workspace-files.js"),
                 import("../../dist/tools/configured-cli.js"),
+                import("../../dist/agent/context-selector.js"),
             ]);
             const readOnlyGit = {
                 ...workspaceGitTool,
@@ -73,7 +75,7 @@ export function conversation(script) {
                 description: "Search source text in a named workspace. args: [literal query, optional relative path], or [--ignore-case, literal query, optional relative path]. Results are file:line:column excerpts. Hidden and generated files are skipped.",
             }]);
             const play = createChatSimulator({
-                fixture, workspaces, MemoryStore, createDeepSeekAgent, AgentSession,
+                fixture, workspaces, MemoryStore, createDeepSeekAgent, AgentSession, createContextSelector,
                 toolRegistry: {
                     memory: (store) => createMemoryTool(store),
                     git: () => readOnlyGit,

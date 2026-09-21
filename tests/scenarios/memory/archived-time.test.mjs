@@ -1,6 +1,6 @@
 import {conversation} from "../../support/agent-fixture.mjs";
 
-// src/time.ts、src/memory/store.ts：原话时间进入上下文。
+// src/time.ts、src/agent/context.ts：原始时间戳优先于历史助手的错误表述。
 conversation({
     name: "历史聊天按北京时间回答，纠正旧回复里的时区错误",
     history: [
