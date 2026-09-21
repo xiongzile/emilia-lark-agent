@@ -133,8 +133,8 @@ export async function startFeishu(
                 return;
             }
 
-            const text = message.content.trim();
-            if (!text) return;
+            const text = message.content;
+            if (!text.trim()) return;
 
             // 入队后立即返回，让 SDK 确认事件，不等待模型生成完毕。
             onText({

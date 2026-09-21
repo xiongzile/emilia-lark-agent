@@ -66,9 +66,11 @@ pnpm service:uninstall
 
 ## 目录
 
-- `src/index.ts`：启动服务，将飞书文本排队传给 agent。
-- `src/channels/feishu.ts`：飞书长连接、文本消息解析。
-- `src/agent/deepseek.ts`：创建 DeepSeek agent、输出流式回复。
+- `src/index.ts`：创建 agent 并启动飞书监听。
+- `src/channels/feishu.ts`：飞书长连接、消息解析和发送。
+- `src/channels/feishu-agent.ts`：消息排队、流式卡片及普通回复兜底。
+- `src/agent/deepseek.ts`：创建 DeepSeek agent、注册工具和记录调用。
+- `src/agent/turn.ts`：发送单轮 prompt，收集最终回答并转发流式文本。
 - `src/config/feishu.ts`：从环境变量读取飞书应用配置。
 - `src/config/local.ts`：加载忽略提交的本地工作区、Prompt 和命令工具。
 

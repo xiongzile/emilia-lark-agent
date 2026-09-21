@@ -11,9 +11,14 @@ A self-hosted Lark/Feishu bot that streams DeepSeek responses into interactive c
 - Lists, reads, and writes UTF-8 files inside named workspaces, and runs an allowlisted set of Git commands there. Destructive Git commands and force pushes are disabled.
 - Loads private workspaces, prompt instructions, and additional constrained command-line tools from an ignored local config.
 - Optionally searches the public web through Tavily, returning up to five short excerpts with source URLs when `TAVILY_API_KEY` is configured.
+- Saves direct-chat wording in ignored local JSON files, distills durable facts into categorized memory, and lets the agent search older memories or transcripts when needed.
 - Includes a macOS `launchd` service with automatic restart and `caffeinate -i` support.
 
-This is still a single-process demo: one in-memory Agent handles messages sequentially, shares its conversation across chats, and loses that conversation when restarted. Only text messages are handled. Web search returns excerpts rather than full-page verification.
+This is still a single-process, single-user demo: one Agent handles messages sequentially. Only text messages are handled. Web search returns excerpts rather than full-page verification.
+
+Memory lives in `.private/memory/transcript.json` and `.private/memory/memories.json`, outside Git. The first turn after startup (and every 20 turns) receives a bounded selection of core facts and recent dialogue. After replies, a separate DeepSeek call extracts durable facts when the chat is idle for 30 seconds, after five pending turns, or immediately after an explicit “remember” request. Failed extraction leaves the original dialogue available for retry. The `memory` tool searches curated facts first and can search archived wording when the agent needs older detail.
+
+Send `/memory` for counts and extraction status, `/memory list [category]` to inspect facts, `/memory show <id>` for provenance, `/memory update` to process pending dialogue and compare facts with recent chat, or `/memory forget <id>` to remove a fact. The update command does not claim to verify external repositories or Lark resources it has not inspected. The original transcript remains after forgetting a fact. These JSON files contain private conversation text; keep the `.private/` directory local.
 
 ## Requirements
 
@@ -34,6 +39,7 @@ git submodule update --init --recursive
 pnpm build:pi
 pnpm install
 pnpm build
+pnpm test
 pnpm start
 ```
 
@@ -42,6 +48,12 @@ The default model is `deepseek-flash`; override it with `DEEPSEEK_MODEL` if the 
 Set `TAVILY_API_KEY` in the ignored `.env` to enable the `web_search` tool. Search queries are sent to Tavily; keep private documents and internal code out of them. The tool returns up to five short excerpts and URLs for attribution. Without the key, the agent continues to run without web search.
 
 Pi source is pinned as the `vendor/pi` submodule. The two Pi dependencies link to that source, so edits under `vendor/pi/packages/agent` or `vendor/pi/packages/ai` can be rebuilt with `pnpm build:pi` and debugged in place. To update Pi, run `git submodule update --remote vendor/pi`, rebuild and verify the agent, then commit the new submodule pointer. An update to the upstream `main` branch does not silently change an existing checkout.
+
+## Testing
+
+`pnpm test` runs offline checks for memory persistence and the message flow, including a failed streaming card and an interrupted generation followed by another message. No Feishu app or API key is needed.
+
+`pnpm eval:agent` calls DeepSeek using `DEEPSEEK_API_KEY` from the environment or local `.env`. It creates temporary Git workspaces and memory files, then checks whether the agent remembers a stable responsibility across a restart, corrects a mistaken repository mapping before reading Git history, and avoids treating an unsupported assistant success claim as verified progress. The run never sends Feishu messages or writes to your configured workspaces. Failures return a nonzero exit code; a local JSON report is saved under `.private/test-runs/` with the observed answers, memories, and tool calls. Model evaluations can vary between runs and consume API tokens.
 
 ## Private extensions
 

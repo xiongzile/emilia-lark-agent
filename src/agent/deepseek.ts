@@ -1,4 +1,4 @@
-import {Agent} from "@earendil-works/pi-agent-core";
+import {Agent, type AgentTool} from "@earendil-works/pi-agent-core";
 import {createModels} from "@earendil-works/pi-ai";
 // @ts-ignore
 import {deepseekProvider} from "@earendil-works/pi-ai/providers/deepseek";
@@ -9,8 +9,11 @@ import {createConfiguredCliTools} from "../tools/configured-cli.ts";
 import {createWebSearchTool} from "../tools/web-search.ts";
 import {localAgentConfig} from "../config/local.ts";
 import {emiliaSystemPrompt} from "../prompts/emilia.ts";
+import {MemoryDistiller} from "../memory/distill.ts";
+import {type MemoryStore} from "../memory/store.ts";
+import {createMemoryTool} from "../memory/tool.ts";
 
-export function createDeepSeekAgent() {
+export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[]) {
     const models = createModels();
 
     models.setProvider(deepseekProvider());
@@ -22,8 +25,17 @@ export function createDeepSeekAgent() {
         throw new Error(`Unknown DeepSeek model '${modelId}'. Available models: ${available}`);
     }
 
-    const configuredTools = createConfiguredCliTools(localAgentConfig.commandTools ?? []);
-    const webSearchTool = createWebSearchTool();
+    const availableTools = tools ?? (() => {
+        const webSearchTool = createWebSearchTool();
+        return [
+            createMemoryTool(memory),
+            larkCliTool,
+            workspaceFilesTool,
+            workspaceGitTool,
+            ...(webSearchTool ? [webSearchTool] : []),
+            ...createConfiguredCliTools(localAgentConfig.commandTools ?? []),
+        ];
+    })();
     const systemPrompt = [emiliaSystemPrompt, localAgentConfig.prompt]
         .filter(Boolean)
         .join("\n\n");
@@ -32,13 +44,7 @@ export function createDeepSeekAgent() {
         initialState: {
             systemPrompt,
             model,
-            tools: [
-                larkCliTool,
-                workspaceFilesTool,
-                workspaceGitTool,
-                ...(webSearchTool ? [webSearchTool] : []),
-                ...configuredTools,
-            ],
+            tools: availableTools,
         },
 
         streamFn: models.streamSimple.bind(models),
@@ -90,5 +96,5 @@ export function createDeepSeekAgent() {
         }
     });
 
-    return agent;
+    return {agent, distiller: new MemoryDistiller(memory, models, model)};
 }
