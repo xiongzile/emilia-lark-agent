@@ -48,20 +48,17 @@ try {
     ]);
 
     function runtime(store, trace) {
-        const safeGitArgs = {
-            status: ["status", "--short"],
-            log: ["log", "-1", "--format=%s"],
-            "rev-parse": ["rev-parse", "--abbrev-ref", "HEAD"],
-        };
+        const readOnlyCommands = new Set(["status", "log", "rev-parse"]);
         const readOnlyGit = {
             ...workspaceGitTool,
             description: "Read-only Git inspection in named workspaces. Available commands: status, log, rev-parse.",
             async execute(id, params, signal, onUpdate) {
-                const safeArgs = safeGitArgs[params.args[0]];
-                if (!safeArgs) {
+                if (!readOnlyCommands.has(params.args[0]) || params.args.some((arg) =>
+                    arg === "--output" || arg.startsWith("--output=") || arg === "--ext-diff" || /^-o(?:$|[^-])/.test(arg)
+                )) {
                     throw new Error("The evaluation allows read-only Git commands only");
                 }
-                return workspaceGitTool.execute(id, {...params, args: safeArgs}, signal, onUpdate);
+                return workspaceGitTool.execute(id, params, signal, onUpdate);
             },
         };
         const {agent, distiller} = createDeepSeekAgent(store, [createMemoryTool(store), readOnlyGit]);
@@ -101,7 +98,8 @@ try {
         const path = join(fixture, "memory-basic");
         const store = await MemoryStore.open(path);
         const first = runtime(store, trace);
-        await first.session.run("profile-1", "请记住：我负责 Android 构建性能优化。");
+        const acknowledgement = await first.session.run("profile-1", "请记住：我负责 Android 构建性能优化。");
+        assert.doesNotMatch(acknowledgement, /没有.{0,8}持久化|没有.{0,8}保存|只在.{0,12}(本轮|当前对话)/, "the agent must not deny the runtime's persistent memory capability");
         await first.distiller.update();
         const profile = store.list("profile").find((entry) => entry.status === "active" && /Android/i.test(entry.text) && /构建/.test(entry.text));
         assert.ok(profile, "the stable responsibility must be distilled as an active profile fact");
@@ -137,6 +135,7 @@ try {
 
         const reopened = await MemoryStore.open(path);
         const second = runtime(reopened, trace);
+        const correctedTraceStart = trace.length;
         const yesOrNo = await second.session.run("repo-3", "pi 是 mobile 仓库吗？只回答“是”或“否”。");
         assert.match(yesOrNo.trim(), /^否[。.!！\s]*$/, "the agent must reject the stale project mapping after restart");
         const projects = reopened.list("project").filter((entry) => entry.status === "active");
@@ -144,9 +143,10 @@ try {
         assert.ok(projects.every((entry) => !/^pi\s*(是|指)\s*mobile/i.test(entry.text)), "the old mapping must not remain active");
 
         const answer = await second.session.run("repo-4", "请只读查看 pi 仓库最近一次 Git 提交的标题，告诉我标题里的标记。不要猜。");
+        const correctedTrace = trace.slice(correctedTraceStart);
         assert.match(answer, /AGENT-MEMORY-731/i, "the answer must use the agent repo commit");
-        assert.ok(trace.some(({tool, args}) => tool === "workspace_git" && args.args?.[0] === "log" && (!args.workspace || args.workspace === "agent")), "the agent must inspect the agent repo history");
-        assert.ok(trace.every(({tool, args}) => tool !== "workspace_git" || args.workspace !== "mobile"), "the wrong repo must not be queried");
+        assert.ok(correctedTrace.some(({tool, args}) => tool === "workspace_git" && args.args?.[0] === "log" && (!args.workspace || args.workspace === "agent")), "the agent must inspect the agent repo history");
+        assert.ok(correctedTrace.every(({tool, args}) => tool !== "workspace_git" || args.workspace !== "mobile"), "the wrong repo must not be queried after correction");
         return {yesOrNo, answer, projects};
     });
 

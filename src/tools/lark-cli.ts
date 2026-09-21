@@ -44,6 +44,7 @@ export const larkCliTool: AgentTool<typeof parameters, {args: string[]}> = {
         "Run the official Lark/Feishu CLI.",
         "Use '<domain> --help' to discover shortcuts and 'schema <service.resource.method>' to inspect an API.",
         "Prefer shortcuts over raw API calls. Use --dry-run before changes when supported.",
+        "Choose --as user or --as bot according to whose identity should perform the operation; do not infer one identity from the other's access.",
         "Authentication and CLI configuration are managed outside the agent.",
     ].join(" "),
     parameters,

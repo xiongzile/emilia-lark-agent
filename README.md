@@ -67,6 +67,8 @@ cp config/prompt.local.example.md .private/prompt.md
 
 Edit `.private/agent.json` to add named workspaces and constrained command tools. Relative workspace paths are resolved from the process working directory. Prompt file paths are resolved from the config file's directory. Set `AGENT_LOCAL_CONFIG` if the config lives elsewhere.
 
+Keep the always-loaded private prompt short. Put detailed project mappings and procedures in `.private/knowledge/` and let the agent read them through `workspace_files` when a task needs them.
+
 Configured commands use `execFile` without a shell. Policies can restrict the first argument, individual arguments, consecutive argument sequences, and regular-expression matches. This provides a useful boundary but does not turn an unsafe executable into a sandbox; expose narrowly scoped CLIs and keep their authentication outside the agent.
 
 For a team, keep the internal configuration in a separate private repository or private package and generate `.private/agent.json` during setup. Avoid public/private branches that carry different source trees: they drift and make accidental disclosure more likely.

@@ -1,5 +1,3 @@
-Private project instructions go here. This file is loaded after the public system prompt.
+Keep only stable local preferences and workspace aliases here. This file is sent with every model request.
 
-- Describe when each local command tool should be used.
-- Record project IDs, repository conventions, and internal URLs here.
-- Keep credentials in the CLI's credential store or in ignored environment files, never in this prompt.
+Put changing project IDs, command recipes, and detailed routing tables in ignored local reference files. The agent can read them with `workspace_files` when a task needs them. Keep credentials outside prompts and reference files.

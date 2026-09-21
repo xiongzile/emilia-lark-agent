@@ -16,7 +16,7 @@ export function createMemoryTool(store: MemoryStore): AgentTool<typeof parameter
     return {
         name: "memory",
         label: "Memory",
-        description: "Search curated long-term memories or archived chat wording when the small automatic context lacks an older detail. Results include source IDs. Do not treat old assistant claims as verified facts.",
+        description: "The runtime archives conversation turns and distills durable facts automatically; this tool retrieves curated memories or older chat wording. Results include source IDs. Do not treat old assistant claims as verified facts.",
         parameters,
         executionMode: "sequential",
         async execute(_toolCallId, {operation, query, id, source}) {

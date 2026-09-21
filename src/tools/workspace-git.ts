@@ -104,6 +104,7 @@ export const workspaceGitTool: AgentTool<typeof parameters, {workspace: string; 
     label: "Workspace Git",
     description: [
         "Run a constrained Git command in a named workspace.",
+        "Inspect only the workspace relevant to the request; check other workspaces only when comparison is requested.",
         "Always inspect status and the current branch before edits; preserve unrelated changes.",
         "Stage explicit task files only. Reset, clean, rebase, merge, broad add, commit rewriting, force push, remote changes, and branch deletion are disabled.",
     ].join(" "),
