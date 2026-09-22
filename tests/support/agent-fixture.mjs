@@ -25,8 +25,8 @@ async function createRepo(path, marker) {
 // so the runtime's cached config and cwd cannot leak between conversations.
 export function conversation(script) {
     test(script.name, async () => {
-        if (!process.env.DEEPSEEK_API_KEY) {
-            throw new Error("DEEPSEEK_API_KEY is required for the real-model agent evaluation");
+        if (!(process.env.AGENT_EVAL_PROVIDER === "openrouter" ? process.env.OPENROUTER_API_KEY : process.env.DEEPSEEK_API_KEY)) {
+            throw new Error("The selected provider API key is required for the real-model agent evaluation");
         }
         if (!script.routerUnavailable && !(process.env.JEV_API_KEY || process.env.TYPESAFE_API_KEY)) {
             throw new Error("JEV_API_KEY is required to evaluate the real turn router");
@@ -50,9 +50,9 @@ export function conversation(script) {
             process.chdir(workspaces.agent);
 
             // Import only after selecting the fixture: config is loaded at module scope.
-            const [{MemoryStore}, {createDeepSeekAgent}, {AgentSession}, {createMemoryTool}, {workspaceGitTool}, {workspaceFilesTool}, {createConfiguredCliTools}] = await Promise.all([
+            const [{MemoryStore}, {createEmiliaAgent}, {AgentSession}, {createMemoryTool}, {workspaceGitTool}, {workspaceFilesTool}, {createConfiguredCliTools}] = await Promise.all([
                 import("../../dist/memory/store.js"),
-                import("../../dist/agent/deepseek.js"),
+                import("../../dist/agent/runtime.js"),
                 import("../../dist/agent/session.js"),
                 import("../../dist/memory/tool.js"),
                 import("../../dist/tools/workspace-git.js"),
@@ -76,7 +76,7 @@ export function conversation(script) {
                 description: "Search source text in a named workspace. args: [literal query, optional relative path], or [--ignore-case, literal query, optional relative path]. Results are file:line:column excerpts. Hidden and generated files are skipped.",
             }]);
             const play = createChatSimulator({
-                fixture, workspaces, MemoryStore, createDeepSeekAgent, AgentSession,
+                fixture, workspaces, MemoryStore, createEmiliaAgent, AgentSession,
                 toolRegistry: {
                     memory: (store) => createMemoryTool(store),
                     git: () => readOnlyGit,
@@ -100,7 +100,8 @@ export function conversation(script) {
             const outputPath = join(outputDirectory, `agent-eval-${Date.now()}-${process.pid}.json`);
             await writeFile(outputPath, JSON.stringify({
                 batch: process.env.AGENT_EVAL_BATCH, round: Number(process.env.AGENT_EVAL_ROUND ?? 1),
-                model: process.env.DEEPSEEK_MODEL || "deepseek-flash", results: [result],
+                provider: process.env.AGENT_EVAL_PROVIDER || "deepseek",
+                model: process.env.AGENT_EVAL_MODEL || process.env.DEEPSEEK_MODEL || "deepseek-flash", results: [result],
             }, null, 2) + "\n", {mode: 0o600});
             console.log(`Conversation report: ${outputPath}`);
         }

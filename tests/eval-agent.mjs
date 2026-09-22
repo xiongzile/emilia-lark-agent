@@ -17,7 +17,7 @@ const patterns = (targets.length ? targets : ["tests/scenarios"]).map((target) =
     statSync(target, {throwIfNoEntry: false})?.isDirectory() ? `${target}/**/*.test.mjs` : target
 );
 const batch = new Date().toISOString();
-const directory = resolve(".private/test-runs", `scored-${batch.replace(/[:.]/g, "-")}`);
+const directory = process.env.AGENT_EVAL_DIRECTORY || resolve(".private/test-runs", `scored-${batch.replace(/[:.]/g, "-")}`);
 if (scored) {
     function hashTree(root) {
         const hash = createHash("sha256");
@@ -29,7 +29,10 @@ if (scored) {
     }
     mkdirSync(directory, {recursive: true, mode: 0o700});
     writeFileSync(join(directory, "manifest.json"), JSON.stringify({label, batch, rounds, targets,
-        model: process.env.DEEPSEEK_MODEL || "deepseek-flash",
+        provider: process.env.AGENT_EVAL_PROVIDER || "deepseek",
+        model: process.env.AGENT_EVAL_MODEL || process.env.DEEPSEEK_MODEL || "deepseek-flash",
+        budgetFile: process.env.AGENT_EVAL_BUDGET_FILE,
+        routingTapeHash: process.env.AGENT_EVAL_ROUTES ? createHash("sha256").update(readFileSync(process.env.AGENT_EVAL_ROUTES)).digest("hex") : null,
         judgeModel: process.env.AGENT_EVAL_JUDGE_MODEL || process.env.DEEPSEEK_MODEL || "deepseek-flash",
         runtimeHash: hashTree("src"), testsHash: hashTree("tests"),
         revision: execFileSync("git", ["rev-parse", "HEAD"], {encoding: "utf8"}).trim(),

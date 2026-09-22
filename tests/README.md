@@ -38,6 +38,57 @@ reports also retain the raw provider answer, so a low-confidence downgrade can b
 distinguished from a wrong provider choice. Full request timelines are test-only.
 Production retains only the latest request for `/tree context` in the ignored private directory.
 
+## Compare model backends with a spending limit
+
+```sh
+pnpm eval:backends --budget=5 --repeat=2
+pnpm eval:backends --budget=1 --models=deepseek:deepseek-flash,openrouter:openai/gpt-5.4-mini tests/scenarios/conversation/tree-repair.test.mjs
+```
+
+The default shortlist is current DeepSeek, Claude Sonnet 5, GPT-5.4 and Gemini 3.8
+Flash. Models must exist in the pinned Pi catalog. These are representative models,
+not a claim to test every backend or an equal-price leaderboard. The same existing
+four scripts cover greeting boundaries, recent-key recovery, tree repair and
+approval capability. Add explicit paths to compare other features. No production
+model or private workspace configuration is changed.
+
+`OPENROUTER_API_KEY` is only needed for OpenRouter models. DeepSeek remains the
+fixed reply judge; Jev remains the live router. Auxiliary memory and compaction use
+the selected backend. All their requests share one budget. Routing is not replayed:
+inspect the saved routes and actual requests before attributing a difference solely
+to the answer model. Scores and strict assertions remain separate.
+
+For a controlled follow-up, add `--routes=<one previous backend directory>`. This
+replays that backend's **first round** of recorded classifier decisions for every
+model, without selecting successful samples or calling Jev. Explicit outage and
+forced-route events in the scenario still apply. Model replies, tool calls and
+subsequent context remain live. A missing route or nonexistent target topic fails
+the comparison instead of silently choosing another branch. Reports pin the tape
+hash, and the runner rejects source/test/judge/tape changes during a batch.
+
+Budgeted runs preserve runtime/provider reasoning defaults, with a 2,048-token output cap, serial test files and no
+SDK retries. A text-request UTF-8 byte bound plus framing allowance and maximum
+output cost is reserved **before** sending. OpenRouter requests specify a provider
+price ceiling and disable provider fallback. A stream without verified billing
+keeps its reservation, including a timeout or crashed child process. Read-only
+billing lookups do not initiate another generation. The local budget is a
+conservative test-run guard, not an account-level spending limit for unrelated apps.
+
+OpenRouter costs come from response usage or its generation record. DeepSeek and
+Jev costs are conservative list-price estimates (cache discounts are not assumed).
+Pricing references: [OpenRouter usage](https://openrouter.ai/docs/cookbook/administration/usage-accounting),
+[provider ceilings](https://openrouter.ai/docs/guides/routing/provider-selection),
+[TypeSafe pricing](https://typesafe.ai/blog/introducing-system-one-models-and-jev).
+Credit purchase fees are excluded. Check published prices when updating models.
+
+Reports live in `.private/test-runs/backends-*/`: plan, per-backend raw traces and
+scores, `comparison.md`, and an append-only `budget.jsonl`. Use
+`--budget-file=<previous budget.jsonl>` with the same `--budget` to continue under
+the **same total limit**, without resetting spent or reserved amounts. Failed
+assertions or missing judge results leave a nonzero exit code but still produce
+comparison reports. Do not quietly retry only the failures or label truncated
+responses as evidence of lower intelligence.
+
 ## Score replies and actual context separately
 
 An event can define `score: {goal, context: [...]}`. `goal` describes the user-visible

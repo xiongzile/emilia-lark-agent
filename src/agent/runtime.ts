@@ -1,7 +1,6 @@
 import {createTreeRouter} from "./tree-router.ts";
 import {Agent, type AgentTool} from "@earendil-works/pi-agent-core";
-import {createModels} from "@earendil-works/pi-ai";
-import {deepseekProvider} from "@earendil-works/pi-ai/providers/deepseek";
+import {createModelBackend} from "./models.ts";
 import {larkCliTool} from "../tools/lark-cli.ts";
 import {workspaceFilesTool} from "../tools/workspace-files.ts";
 import {workspaceGitTool} from "../tools/workspace-git.ts";
@@ -15,18 +14,9 @@ import {createMemoryTool} from "../memory/tool.ts";
 import {createContextCompactor, summaryInstruction} from "./context.ts";
 import {createContextTreeTool} from "./tree-tools.ts";
 
-export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[],
-    contextBudget = {maxTokens: 64000, keepTokens: 16000}) {
-    const models = createModels();
-
-    models.setProvider(deepseekProvider());
-
-    const modelId = process.env.DEEPSEEK_MODEL?.trim() || "deepseek-flash";
-    const model = models.getModel("deepseek", modelId);
-    if (!model) {
-        const available = models.getModels("deepseek").map((item) => item.id).join(", ");
-        throw new Error(`Unknown DeepSeek model '${modelId}'. Available models: ${available}`);
-    }
+export function createEmiliaAgent(memory: MemoryStore, tools?: AgentTool[],
+    contextBudget = {maxTokens: 64000, keepTokens: 16000}, backend = createModelBackend()) {
+    const {models, model} = backend;
 
     const availableTools = [createContextTreeTool(memory), ...(tools ?? (() => {
         const webSearchTool = createWebSearchTool();
@@ -67,7 +57,7 @@ export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[],
             }],
         }, {toolChoice: "none", maxTokens: 2048,
             signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000)});
-        console.log("[DeepSeek compaction usage]", response.usage);
+        console.log("[Model compaction usage]", response.usage);
         if (response.stopReason !== "stop") throw new Error(`Summary failed: ${response.stopReason}`);
         return response.content.filter(part => part.type === "text").map(part => part.text).join("");
     }, {...contextBudget, maxTokens: Math.min(contextBudget.maxTokens, model.contextWindow - 8192)});
@@ -104,7 +94,8 @@ export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[],
                 ? 0
                 : usage.cacheRead / promptTokens;
 
-            console.log("\n[DeepSeek usage]", {
+            console.log("\n[Model usage]", {
+                provider: model.provider, model: model.id,
                 promptTokens,
                 cacheHitTokens: usage.cacheRead,
                 cacheMissTokens: usage.input,

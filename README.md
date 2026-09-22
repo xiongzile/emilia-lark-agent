@@ -78,6 +78,13 @@ Run a feature with `pnpm eval:agent tests/scenarios/memory`, or pass one `.test.
 
 Use `pnpm eval:agent --score --repeat=5 --label=context-tree tests/scenarios/conversation/recent-key-after-greeting.test.mjs` to measure reply quality and actual-request context coverage separately. Reports include every round and critical missing evidence; a fluent answer cannot hide missing context.
 
+Compare the same conversations across DeepSeek and OpenRouter backends with
+`pnpm eval:backends --budget=5 --repeat=2`. This explicitly budgeted shortlist
+records tool behavior, actual context, reply scores and spending separately.
+It leaves the live bot on DeepSeek. See [multi-backend testing](tests/README.md#compare-model-backends-with-a-spending-limit)
+for credentials, limits and how to keep the same budget across retries.
+The [first measured comparison](docs/backend-evaluation.md) records outcomes and limitations.
+
 These evaluations check saved memory, actual temporary-file contents, and tool arguments and call counts. External service commands are simulated: no Feishu message is sent and no configured user workspace is modified. Each case saves an ordered conversation/tool report under `.private/test-runs/` and returns a nonzero exit code on failure. Model evaluations can vary between runs and consume API tokens.
 
 ## Private extensions

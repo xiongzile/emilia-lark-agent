@@ -1,3 +1,4 @@
+import {evaluationBackend, evaluationRouter} from "./eval-backend.mjs";
 import assert from "node:assert/strict";
 import {mkdtemp, readFile, writeFile} from "node:fs/promises";
 import {join} from "node:path";
@@ -72,8 +73,8 @@ async function checkExpect(expect, {reply, calls, store, workspaces, compactions
     if (expect.notReply) assert.doesNotMatch(reply, expect.notReply);
 }
 
-export function createChatSimulator({fixture, workspaces, MemoryStore, createDeepSeekAgent, AgentSession, toolRegistry}) {
-    return async function play({history = [], tools = ["memory", "git"], events, routerUnavailable = false, contextBudget}) {
+export function createChatSimulator({fixture, workspaces, MemoryStore, createEmiliaAgent, AgentSession, toolRegistry}) {
+    return async function play({name, history = [], tools = ["memory", "git"], events, routerUnavailable = false, contextBudget}) {
         const directory = await mkdtemp(join(fixture, "memory-"));
         if (history.length) {
             await writeFile(join(directory, "transcript.json"), JSON.stringify({
@@ -108,11 +109,13 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
             timeline.push({type: "compaction", before: before.length, after: after.length});
         }
 
+        const router = evaluationRouter(name);
+
         function start() {
             const resolvedTools = tools.map((tool) =>
                 typeof tool === "string" ? toolRegistry[tool](store) : tool
             );
-            const runtime = createDeepSeekAgent(store, resolvedTools, contextBudget);
+            const runtime = createEmiliaAgent(store, resolvedTools, contextBudget, evaluationBackend());
             // The provider hook sees the serialized request, after context selection
             // and conversion. Observe only: never change what the model receives.
             runtime.agent.onPayload = payload => {
@@ -121,7 +124,12 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
             distiller = runtime.distiller;
             session = new AgentSession(runtime.agent, store, distiller, async (...args) => {
                 if (routingUnavailable) throw new Error("simulated router outage");
-                const route = forcedRoute ?? await runtime.router(...args);
+                let route;
+                try {route = forcedRoute ?? await router(...args);}
+                catch (error) {
+                    if (process.env.AGENT_EVAL_ROUTES) failures.push(error);
+                    throw error;
+                }
                 timeline.push({type: "route", ...route});
                 return route;
             }, async (messages, signal) => {
@@ -200,8 +208,9 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
             error.timeline = timeline;
             throw error;
         } finally {
-            await distiller.stop();
-            await store.history.close();
+            try {await distiller.stop();}
+            catch (error) {error.timeline = timeline; throw error;}
+            finally {await store.history.close();}
         }
         return timeline;
     };

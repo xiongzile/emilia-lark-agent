@@ -23,7 +23,7 @@ export async function writeScoreReport(directory, baselineDirectory) {
         "Critical context losses and business assertion failures require inspection regardless of average scores. Scores do not authorize deployment."];
     if (baselineDirectory) {
         const baseline = await load(baselineDirectory);
-        for (const field of ["testsHash", "model", "judgeModel", "pi"]) {
+        for (const field of ["testsHash", "provider", "model", "judgeModel", "pi", "routingTapeHash"]) {
             if (baseline.manifest[field] !== result.manifest[field]) throw new Error(`Cannot compare: ${field} differs`);
         }
         const names = summary => summary.cases.map(row => row.name).sort().join("\n");

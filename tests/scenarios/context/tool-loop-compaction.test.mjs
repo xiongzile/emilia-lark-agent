@@ -1,7 +1,7 @@
 import {conversation} from "../../support/agent-fixture.mjs";
 import {mockCommand} from "../../support/chat-simulator.mjs";
 
-// deepseek.ts prepareNextTurn: compact between tool iterations, then continue
+// session.ts prepareNextTurn: compact between tool iterations, then continue
 // with paired results and retain the actual revision for the next authorized write.
 conversation({
     name: "工具返回触发压缩仍能完成回复，下一轮按已查到的 revision 写一次",
