@@ -78,7 +78,7 @@ request). OpenRouter responses/generation records report **USD 0.5569**. These a
 not additive totals: the OpenRouter figure is already included in the ledger.
 The account usage snapshot showed about USD 0.55 increase at that moment; reporting
 can settle later. Credit-purchase fees and unrelated applications are outside the
-local test-run budget. No additional paid runs were started after this comparison.
+local test-run budget. The later frontier-model run below continues this same ledger.
 
 Offline validation passes **47/47**, including shared budget reservations,
 interrupted streams, actual Pi serialization for all four model configurations,
@@ -94,3 +94,47 @@ Local evidence (ignored by Git):
 
 Each backend directory contains its manifest, actual request timelines, failed
 assertions and scores. Reformatting these reports does not call models again.
+
+## GPT-6 Astra and Claude Opus 5 follow-up
+
+One fresh repetition of the same four conversations uses OpenRouter models
+`openai/gpt-6-astra` and `anthropic/claude-opus-5`. Both were present in the live
+OpenRouter catalog and the pinned Pi catalog. OpenAI also documents the
+[GPT-6 Astra model](https://developers.openai.com/api/docs/models/gpt-6-astra).
+No runtime, prompt or test changes were needed. Source, test, Pi, judge and routing
+tape hashes match the earlier fixed-routing comparison. The same output limits
+and runtime/provider reasoning defaults apply.
+
+| Model | Complete conversations passing | Graded checkpoint mean /100 | Required context evidence /100 | Accounted USD including auxiliaries |
+| --- | ---: | ---: | ---: | ---: |
+| GPT-6 Astra | 3/4 | 100.00 | 100.00 | 0.2427 |
+| Claude Opus 5 | 3/4 | 93.75 | 100.00 | 0.1823 |
+
+Both correctly query the recent key after greeting/restart/router failure, recover
+the document through the context tree, and inspect CLI help before confirming
+approval capability without executing an approval. GPT-6 additionally queries
+claims during the initial publication query, then queries again when asked; the
+conversation passes, but that first extra query is unnecessary.
+
+Both fail the greeting conversation. GPT-6 replies with an extra question but
+does not mention the old topic. Opus brings the old Jev/architecture discussion
+into all three casual turns and corrects the user's evening greeting based on
+the current afternoon time. The shared routing tape deliberately preserves a
+timeout fallback that exposes the old topic at this greeting. This is evidence
+of different responses to the same routing failure, not a clean test of correct
+greeting isolation. GPT-6's 100 graded score excludes the initial greeting, as
+explained above, and must not be read as a perfect conversation score.
+
+No judge errors or annotated critical-context losses occur in this follow-up.
+The largest reported output was 402 tokens for the GPT-6 run and 232 for Opus,
+including auxiliary calls; failures do not show output-cap exhaustion.
+
+The follow-up adds **USD 0.4250** to the ledger, of which **USD 0.4218** is
+OpenRouter-reported billing. Cumulative accounting is now **USD 1.1464 / 5**, with
+the original twenty unsettled reservations still included and no new unsettled
+requests. Production remains on DeepSeek. One sample per case suggests a useful
+tool-verification improvement over the earlier GPT-5.4/Sonnet/DeepSeek samples;
+it does not establish stability or show that a more expensive model fixes context
+selection. No further paid runs were started for this follow-up.
+
+Local evidence: `.private/test-runs/backends-2026-09-22T09-32-43-815Z/`.
