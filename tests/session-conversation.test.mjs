@@ -18,7 +18,7 @@ test("查看记忆状态、暂停和重启不丢任务来源，存活会话保�
             async prompt(message) {
                 requests.push(structuredClone(this.state.messages));
                 this.state.messages.push(message);
-                if (message.content.at(-1).text.includes("查文档")) this.state.messages.push(
+                if (message.content.some(part => part.text?.startsWith("用户当前消息：\n查文档"))) this.state.messages.push(
                     {role: "assistant", content: [{type: "toolCall", id: "call-1", name: "lookup", arguments: {}}]},
                     {role: "toolResult", toolCallId: "call-1", toolName: "lookup", content: [{type: "text", text: "DOC-731"}]},
                 );

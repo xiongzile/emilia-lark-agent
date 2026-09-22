@@ -25,6 +25,8 @@ results, and assertion failures. Reports and credentials stay local.
 
 | Cases | Implemented behavior |
 | --- | --- |
+| `scenarios/context/` | `agent/context.ts`, `tools/output.ts`, `workspace-files.ts`: recover an answer beyond the CLI preview without repeating the command; after real-model compaction, execute the corrected target once and preserve the greeting boundary; compact between tool iterations without losing paired results or the revision needed by the next write. |
+| `cache-prefix.test.mjs`, `context-budget.test.mjs`, `tool-output.test.mjs` | Actual DeepSeek request serialization across twelve turns, mode/memory changes, whole-turn compaction and failure preservation, Unicode paging, complete result recovery, and bounded command errors. |
 | `scenarios/routing/` | Real Jev decisions for greetings, mixed requests, technical chat, implicit references, archived-context recall and deferred tasks. No main-model reply can hide a classification failure. |
 | `scenarios/conversation/` | `agent/conversation.ts`, `session.ts`, `history.ts`: greeting boundaries across several turns and restart, implicit search subjects, acknowledgements, topic changes, paused tasks and router outages. |
 | `conversation/resume-task-reference`, `pronoun-target-correction`, `task-option-reference` | Restore an unnamed earlier task within ten turns after multiple topics/restart; resolve current and corrected document references; apply the latest first/second choice exactly once. |
@@ -73,7 +75,7 @@ test the agent's decisions, not the real service's permissions or delivery.
 main model. Call expectations support `query: /pattern/` for the real search
 schema. `support/web-search.mjs` returns fixed public snippets without giving
 corrective instructions to a bad query. Conversation reports include the route,
-its latency, and the state saved after each reply.
+its latency, model token/cache usage, and the state saved after each reply.
 
 See [the design and evaluation report](../docs/conversation-routing.md) for current checks and the earlier comparison. Greeting cases assert the full exchange, not just a router label. `greeting-does-not-confirm-task` checks that “好” after a greeting cannot approve an old deletion request. All assertions remain active; a failed run is retained rather than silently retried.
 
@@ -81,3 +83,5 @@ Classifier-only examples use `routing({name, history, state, cases})` from
 `support/route-fixture.mjs`. Each case names a user message and the expected mode
 and history relation. They call the production router, require a real provider
 result, and save every decision and latency in a local JSON report.
+
+Context scenarios can set `contextBudget: {maxTokens, keepTokens}` to trigger the production compactor with a small fixture, and assert `compacted: true`. Cache-prefix tests intercept the provider payload before network I/O; they check actual serialized request continuity, not merely the in-memory message list. Real cache hit percentages are measurements, not deterministic assertions.

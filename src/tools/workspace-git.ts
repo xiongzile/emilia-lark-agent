@@ -1,4 +1,4 @@
-import {execFile} from "node:child_process";
+import {runCommand} from "./output.ts";
 import {Type} from "@earendil-works/pi-ai";
 import type {AgentTool} from "@earendil-works/pi-agent-core";
 import {getWorkspaceRoot, workspaceNames} from "../config/workspaces.ts";
@@ -77,29 +77,6 @@ function assertAllowed(args: string[]): void {
     }
 }
 
-function runGit(root: string, args: string[], signal?: AbortSignal): Promise<string> {
-    return new Promise((resolve, reject) => {
-        execFile(
-            "git",
-            ["-C", root, ...args],
-            {
-                encoding: "utf8",
-                maxBuffer: maxOutputBytes,
-                timeout: 180_000,
-                signal,
-            },
-            (error, stdout, stderr) => {
-                if (error) {
-                    const diagnostic = stderr.trim() || stdout.trim() || error.message;
-                    reject(new Error(`git failed: ${diagnostic}`));
-                    return;
-                }
-                resolve(stdout.trim() || stderr.trim() || "Command completed with no output.");
-            },
-        );
-    });
-}
-
 export const workspaceGitTool: AgentTool<typeof parameters, {workspace: string; args: string[]}> = {
     name: "workspace_git",
     label: "Workspace Git",
@@ -114,7 +91,9 @@ export const workspaceGitTool: AgentTool<typeof parameters, {workspace: string; 
     async execute(_toolCallId, {workspace, args}, signal) {
         assertAllowed(args);
         const selectedWorkspace = getWorkspaceRoot(workspace);
-        const output = await runGit(selectedWorkspace.root, args, signal);
+        const output = await runCommand("git", ["-C", selectedWorkspace.root, ...args], {
+            encoding: "utf8", maxBuffer: maxOutputBytes, timeout: 180_000, signal,
+        });
         return {
             content: [{type: "text", text: output}],
             details: {workspace: selectedWorkspace.name, args},

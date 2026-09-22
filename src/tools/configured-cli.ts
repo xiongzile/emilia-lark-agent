@@ -1,4 +1,4 @@
-import {execFile} from "node:child_process";
+import {runCommand} from "./output.ts";
 import {Type} from "@earendil-works/pi-ai";
 import type {AgentTool} from "@earendil-works/pi-agent-core";
 import type {CommandToolConfig} from "../config/local.ts";
@@ -61,21 +61,12 @@ export function createConfiguredCliTools(
                 const selectedWorkspace = getWorkspaceRoot(workspace);
                 const allArgs = [...(config.prependArgs ?? []), ...args];
 
-                const output = await new Promise<string>((resolve, reject) => {
-                    execFile(config.executable, allArgs, {
-                        cwd: selectedWorkspace.root,
-                        encoding: "utf8",
-                        maxBuffer: config.maxOutputBytes ?? 2 * 1024 * 1024,
-                        timeout: config.timeoutMs ?? 120_000,
-                        signal,
-                    }, (error, stdout, stderr) => {
-                        if (error) {
-                            const diagnostic = stderr.trim() || stdout.trim() || error.message;
-                            reject(new Error(`${config.name} failed: ${diagnostic}`));
-                            return;
-                        }
-                        resolve(stdout.trim() || stderr.trim() || "Command completed with no output.");
-                    });
+                const output = await runCommand(config.executable, allArgs, {
+                    cwd: selectedWorkspace.root,
+                    encoding: "utf8",
+                    maxBuffer: config.maxOutputBytes ?? 2 * 1024 * 1024,
+                    timeout: config.timeoutMs ?? 120_000,
+                    signal,
                 });
 
                 return {

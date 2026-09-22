@@ -3,8 +3,9 @@ import {dirname, isAbsolute, relative, resolve, sep} from "node:path";
 import {Type} from "@earendil-works/pi-ai";
 import type {AgentTool} from "@earendil-works/pi-agent-core";
 import {getWorkspaceRoot, workspaceNames} from "../config/workspaces.ts";
+import {limitToolOutput, textPage} from "./output.ts";
 
-const maxReadBytes = 256 * 1024;
+const maxReadBytes = 16 * 1024 * 1024;
 const maxWriteBytes = 1024 * 1024;
 
 const parameters = Type.Object({
@@ -25,6 +26,8 @@ const parameters = Type.Object({
     content: Type.Optional(Type.String({
         description: "Complete UTF-8 file content. Required for write and ignored otherwise.",
     })),
+    offset: Type.Optional(Type.Integer({minimum: 0, description: "Read starting at this character offset (0-based). Use the nextOffset from the previous page."})),
+    limit: Type.Optional(Type.Integer({minimum: 1, maximum: 12000, description: "Maximum characters to read; defaults to 12000. Large files are paged."})),
 });
 
 function isWithinWorkspace(workspaceRoot: string, path: string): boolean {
@@ -112,12 +115,13 @@ export const workspaceFilesTool: AgentTool<
     description: [
         `List directories and read or write UTF-8 text files in named workspaces: ${workspaceNames.join(", ")}.`,
         "Paths outside this workspace are rejected, including paths reached through symbolic links.",
-        "Use relative paths. Reads are limited to 256 KiB and writes to 1 MiB.",
+        "Use relative paths. Read files up to 16 MiB in pages using offset/limit; follow the next offset to continue. Writes are limited to 1 MiB.",
         "Writing replaces the complete file and creates missing parent directories. Deletion is not supported.",
+        "Read remaining pages before replacing a file; a preview is not its complete content.",
     ].join(" "),
     parameters,
     executionMode: "sequential",
-    async execute(_toolCallId, {workspace, operation, path, content}, signal) {
+    async execute(_toolCallId, {workspace, operation, path, content, offset = 0, limit = 12000}, signal) {
         signal?.throwIfAborted();
         const selectedWorkspace = getWorkspaceRoot(workspace);
         const {root: workspaceRoot} = selectedWorkspace;
@@ -143,11 +147,11 @@ export const workspaceFilesTool: AgentTool<
             return {
                 content: [{
                     type: "text",
-                    text: JSON.stringify({
+                    text: await limitToolOutput(JSON.stringify({
                         workspace: selectedWorkspace.name,
                         path: displayPath(workspaceRoot, actualPath),
                         entries: result,
-                    }),
+                    })),
                 }],
                 details: {workspace: selectedWorkspace.name, operation, path},
             };
@@ -163,8 +167,10 @@ export const workspaceFilesTool: AgentTool<
 
             const data = await readFile(actualPath, {signal});
             if (data.includes(0)) throw new Error(`Binary files are not supported: ${path}`);
+            const page = textPage(data.toString("utf8"), offset, limit);
             return {
-                content: [{type: "text", text: data.toString("utf8")}],
+                content: [{type: "text", text: page.content + (page.hasMore
+                    ? `\n\n[More content available: workspace_files operation="read", workspace="${selectedWorkspace.name}", path="${path}", offset=${page.nextOffset}]` : "")}],
                 details: {workspace: selectedWorkspace.name, operation, path},
             };
         }

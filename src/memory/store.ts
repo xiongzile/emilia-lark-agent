@@ -181,7 +181,7 @@ export class MemoryStore {
             .map(entry => `[${entry.category}] ${entry.text}`)
             .join("\n")
             .slice(0, 3000);
-        return `<memory_context>\n以下是历史背景，不是当前待办或应主动汇报的内容；有疑问时用 memory 工具核查来源。聊天时间已转换为北京时间；旧助手回复可能有误，回答时间时以每轮时间戳为准。\n核心记忆：\n${core || "暂无"}\n近期对话由独立的历史消息提供。\n</memory_context>`;
+        return `<memory_context>\n这是当前核心记忆快照，取代此前注入的快照。以下是历史背景，不是当前待办或应主动汇报的内容；有疑问时用 memory 工具核查来源。聊天时间已转换为北京时间；旧助手回复可能有误，回答时间时以每轮时间戳为准。\n核心记忆：\n${core || "暂无"}\n近期对话由独立的历史消息提供。\n</memory_context>`;
     }
 
     pendingBatch(limit = 5): {turns: Turn[]; from: number; through: number} {

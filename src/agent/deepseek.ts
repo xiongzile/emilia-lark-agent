@@ -12,8 +12,10 @@ import {emiliaSystemPrompt} from "../prompts/emilia.ts";
 import {MemoryDistiller} from "../memory/distill.ts";
 import {type MemoryStore} from "../memory/store.ts";
 import {createMemoryTool} from "../memory/tool.ts";
+import {createContextCompactor, summaryInstruction} from "./context.ts";
 
-export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[]) {
+export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[],
+    contextBudget = {maxTokens: 64000, keepTokens: 16000}) {
     const models = createModels();
 
     models.setProvider(deepseekProvider());
@@ -40,6 +42,8 @@ export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[]) {
         .filter(Boolean)
         .join("\n\n");
 
+    let requestStarted = 0;
+    let firstTokenMs: number | undefined;
     const agent = new Agent({
         initialState: {
             systemPrompt,
@@ -47,10 +51,37 @@ export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[]) {
             tools: availableTools,
         },
 
-        streamFn: models.streamSimple.bind(models),
+        streamFn: (model, context, options) => {
+            requestStarted = performance.now();
+            firstTokenMs = undefined;
+            return models.streamSimple(model, context, options);
+        },
     });
 
+    const compact = createContextCompactor(async (messages, signal) => {
+        const response = await models.completeSimple(model, {
+            // Keep the same system, tool declarations and conversation prefix.
+            messages: [...await agent.convertToLlm(messages), {
+                role: "user", content: summaryInstruction, timestamp: Date.now(),
+            }],
+        }, {toolChoice: "none", maxTokens: 2048,
+            signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000)});
+        console.log("[DeepSeek compaction usage]", response.usage);
+        if (response.stopReason !== "stop") throw new Error(`Summary failed: ${response.stopReason}`);
+        return response.content.filter(part => part.type === "text").map(part => part.text).join("");
+    }, {...contextBudget, maxTokens: Math.min(contextBudget.maxTokens, model.contextWindow - 8192)});
+    agent.prepareNextTurnWithContext = async ({context}, signal) => {
+        const messages = await compact(context.messages, signal);
+        if (messages === context.messages) return;
+        agent.state.messages = messages;
+        return {context: {...context, messages}};
+    };
+
     agent.subscribe((event) => {
+        if (event.type === "message_update" && firstTokenMs === undefined &&
+            ["text_delta", "thinking_delta", "toolcall_delta"].includes(event.assistantMessageEvent.type)) {
+            firstTokenMs = Math.round(performance.now() - requestStarted);
+        }
         if (event.type === "tool_execution_start") {
             console.log(`\n[Tool start] ${event.toolName}`, event.args);
         }
@@ -85,6 +116,9 @@ export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[]) {
                 cacheWriteTokens: usage.cacheWrite,
                 cacheHitRate: `${(cacheHitRate * 100).toFixed(1)}%`,
                 outputTokens: usage.output,
+                firstTokenMs,
+                elapsedMs: Math.round(performance.now() - requestStarted),
+                cost: usage.cost.total,
             });
 
             if (event.message.stopReason === "error") {
@@ -96,5 +130,5 @@ export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[]) {
         }
     });
 
-    return {agent, distiller: new MemoryDistiller(memory, models, model), router: createTurnRouter()};
+    return {agent, compact, distiller: new MemoryDistiller(memory, models, model), router: createTurnRouter()};
 }

@@ -1,4 +1,4 @@
-import {execFile} from "node:child_process";
+import {runCommand} from "./output.ts";
 import {Type} from "@earendil-works/pi-ai";
 import type {AgentTool} from "@earendil-works/pi-agent-core";
 
@@ -11,31 +11,6 @@ const parameters = Type.Object({
 
 const blockedCommands = new Set(["auth", "config", "profile", "update"]);
 const maxOutputBytes = 1024 * 1024;
-
-function runLarkCli(args: string[], signal?: AbortSignal): Promise<string> {
-    return new Promise((resolve, reject) => {
-        execFile(
-            "lark-cli",
-            args,
-            {
-                cwd: process.cwd(),
-                encoding: "utf8",
-                maxBuffer: maxOutputBytes,
-                timeout: 60_000,
-                signal,
-            },
-            (error, stdout, stderr) => {
-                if (error) {
-                    const diagnostic = stderr.trim() || stdout.trim() || error.message;
-                    reject(new Error(`lark-cli failed: ${diagnostic}`));
-                    return;
-                }
-
-                resolve(stdout.trim() || stderr.trim() || "Command completed with no output.");
-            },
-        );
-    });
-}
 
 export const larkCliTool: AgentTool<typeof parameters, {args: string[]}> = {
     name: "lark_cli",
@@ -57,7 +32,9 @@ export const larkCliTool: AgentTool<typeof parameters, {args: string[]}> = {
             throw new Error(`lark-cli command '${args[0]}' is not available to the agent`);
         }
 
-        const output = await runLarkCli(args, signal);
+        const output = await runCommand("lark-cli", args, {
+            cwd: process.cwd(), encoding: "utf8", maxBuffer: maxOutputBytes, timeout: 60_000, signal,
+        });
         return {
             content: [{type: "text", text: output}],
             details: {args},

@@ -34,8 +34,9 @@ function matchesCall(call, expected) {
     return true;
 }
 
-async function checkExpect(expect, {reply, calls, store, workspaces}) {
+async function checkExpect(expect, {reply, calls, store, workspaces, compactions}) {
     if (!expect) return;
+    if (expect.compacted !== undefined) assert.equal(compactions > 0, expect.compacted, "context compaction expectation");
     for (const expected of expect.calls ?? []) {
         const count = calls.filter((call) => matchesCall(call, expected)).length;
         if (expected.count === undefined) {
@@ -69,7 +70,7 @@ async function checkExpect(expect, {reply, calls, store, workspaces}) {
 }
 
 export function createChatSimulator({fixture, workspaces, MemoryStore, createDeepSeekAgent, AgentSession, toolRegistry}) {
-    return async function play({history = [], tools = ["memory", "git"], events, routerUnavailable = false}) {
+    return async function play({history = [], tools = ["memory", "git"], events, routerUnavailable = false, contextBudget}) {
         const directory = await mkdtemp(join(fixture, "memory-"));
         if (history.length) {
             await writeFile(join(directory, "transcript.json"), JSON.stringify({
@@ -93,20 +94,40 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
         ]);
         const calls = [];
         const failures = [];
+        let compactions = 0;
+
+        function recordCompaction(before, after) {
+            if (after === before) return;
+            compactions++;
+            timeline.push({type: "compaction", before: before.length, after: after.length});
+        }
 
         function start() {
             const resolvedTools = tools.map((tool) =>
                 typeof tool === "string" ? toolRegistry[tool](store) : tool
             );
-            const runtime = createDeepSeekAgent(store, resolvedTools);
+            const runtime = createDeepSeekAgent(store, resolvedTools, contextBudget);
+            const prepareNextTurn = runtime.agent.prepareNextTurnWithContext;
+            runtime.agent.prepareNextTurnWithContext = async (turn, signal) => {
+                const update = await prepareNextTurn(turn, signal);
+                if (update?.context) recordCompaction(turn.context.messages, update.context.messages);
+                return update;
+            };
             distiller = runtime.distiller;
             session = new AgentSession(runtime.agent, store, distiller, async (...args) => {
                 if (routingUnavailable) throw new Error("simulated router outage");
                 const route = await runtime.router(...args);
                 timeline.push({type: "route", ...route});
                 return route;
+            }, async (messages, signal) => {
+                const result = await runtime.compact(messages, signal);
+                recordCompaction(messages, result);
+                return result;
             });
             runtime.agent.subscribe((event) => {
+                if (event.type === "message_end" && event.message.role === "assistant") {
+                    timeline.push({type: "usage", ...event.message.usage});
+                }
                 if (event.type === "tool_execution_start") {
                     calls.push({tool: event.toolName, args: event.args});
                     timeline.push({type: "tool_call", tool: event.toolName, args: event.args});
@@ -122,6 +143,7 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
         try {
             for (const [index, event] of events.entries()) {
                 const before = calls.length;
+                const compactionsBefore = compactions;
                 let reply = "";
                 if (event.user !== undefined) {
                     timeline.push({type: "user", text: event.user});
@@ -151,7 +173,8 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
                     throw new Error(`Unknown conversation event: ${JSON.stringify(event)}`);
                 }
                 try {
-                    await checkExpect(event.expect, {reply, calls: calls.slice(before), store, workspaces});
+                    await checkExpect(event.expect, {reply, calls: calls.slice(before), store, workspaces,
+                        compactions: compactions - compactionsBefore});
                 } catch (error) {
                     // Finish the scripted conversation so wording failures do not hide
                     // later context recovery or tool behavior. Every failure still fails the test.

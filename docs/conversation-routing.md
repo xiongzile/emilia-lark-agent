@@ -99,17 +99,16 @@ steps. No per-message relevance filter or second classifier is introduced.
 ## Request flow
 
 1. Archive the user's message and load `ConversationState`.
-2. Fetch up to six exchanges starting at `segmentStart`.
+2. Keep the live segment as an append-only transcript. When restoring a session, fetch up to six exchanges starting at `segmentStart`, plus saved topic/task references.
 3. Route using the current message and the last ten complete exchanges, including
    exchanges before the boundary. Each is marked `current` or `earlier`; the original
    user/assistant text is not clipped. Active topic names still belong to the current
    segment. Seeing an earlier task is not permission to resume it.
-4. Assemble the main model's context separately. Only `recall` adds the ten exchanges
+4. Select missing history separately and append it without rewriting messages already sent. Only `recall` adds the ten exchanges
    visible to the classifier and saved topic/task sources. A greeting or resolved new chat gets
    no earlier exchanges and only profile/preference memory. Later ordinary chat
    stays within that segment. A greeting also omits the current-time block.
-5. Run Pi with per-turn system guidance. The user's actual request takes precedence
-   if classification was mistaken. Reply through the existing streaming path.
+5. Keep system instructions and tool declarations stable during work and discussion; isolated greetings retain their system-level response guidance, then the next chat restores the stable base. Append changed memory snapshots, runtime data, and the current request, followed by turn guidance. Compact older context only when the token budget is reached; preserve the complete active turn. The user's actual request takes precedence if classification was mistaken. Reply through the existing streaming path. See [context and cache management](context-cache.md).
 6. Save the final reply and updated state together. A greeting or resolved new chat
    moves `segmentStart` to its message ID. Each topic/task reference records which
    segment activated it; a new chat does not replace the archived task reference.
