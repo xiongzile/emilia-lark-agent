@@ -1,6 +1,6 @@
 import {conversation} from "../../support/agent-fixture.mjs";
 
-// agent/conversation.ts: a discourse-like prefix is not enough to assume continuation.
+// agent/tree-router.ts: a discourse-like prefix is not enough to assume continuation.
 conversation({
     name: "为什么开头也可以是新话题，不把天空问题当成工作追问",
     history: [{user: "创建一个 MR。", assistant: "你需要先提供目标分支。"}],

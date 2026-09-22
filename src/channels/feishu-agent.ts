@@ -1,5 +1,6 @@
 import type {AgentSession} from "../agent/session.ts";
 import {isMemoryCommand} from "../memory/commands.ts";
+import {isTreeCommand} from "../agent/tree-tools.ts";
 import type {FeishuTextMessage, FeishuStreamWriter} from "./feishu.ts";
 
 export interface FeishuTransport {
@@ -13,7 +14,7 @@ async function replyToMessage(session: AgentSession, transport: FeishuTransport,
     let promptStarted = false;
 
     try {
-        if (isMemoryCommand(text)) {
+        if (isMemoryCommand(text) || isTreeCommand(text)) {
             const reply = await session.run(messageId, text);
             await transport.reply(messageId, reply);
             return;

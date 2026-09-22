@@ -6,18 +6,20 @@ loop could reuse its prefix, while the next user message or mode change invalida
 
 ## Request layout
 
-`AgentSession` keeps the leading system prompt and tool declarations unchanged during
-work and discussion. Within a live segment, requests grow by appending messages. Runtime time, changed
-memory snapshots, and the current user message appear after existing history; turn
-guidance follows the user text. Unchanged memory snapshots are not repeated.
+`AgentSession` derives context from the selected topic's references into Pi's journal.
+Within one topic, without compaction, requests append to the same system/tool prefix
+and conversation. Runtime time,
+changed memory snapshots and the current request follow existing messages.
+Unchanged memory snapshots are not repeated. There is no per-turn mode guidance.
 
-A greeting or resolved new chat still starts a fresh segment. An isolated greeting
-keeps its original system-level response guidance; the following chat restores the
-stable base prompt. This small boundary-specific cache reset preserves response policy. Explicit recall appends
-missing historical evidence, marked as history, and refreshes the memory snapshot.
-A failed reply is restored from the archive as an unknown outcome rather than replaying
-partial generation. Restart restores bounded archived wording, not fabricated tool results.
-These boundaries deliberately change the prefix; cache reuse does not override conversation intent.
+Selecting another topic intentionally changes the conversation prefix. The system
+prompt and tool list remain stable; greetings do not add a separate system section.
+Returning to a topic restores its messages and observations. `context_tree` remains
+available in every mode. Cache reuse does not override topic boundaries.
+
+Per-topic compaction checkpoints persist in the journal. Restart restores the checkpoint and
+following Pi messages, including tool results, without replaying actions. Legacy
+JSON contains wording only; it cannot provide evidence that was never recorded.
 
 ## Output and context budgets
 
@@ -44,7 +46,7 @@ These boundaries deliberately change the prefix; cache reuse does not override c
   An existing summary is not repeatedly summarized just because the active turn is large.
 - Summaries retain corrected identifiers, authorization scope, completed actions,
   tool evidence, outstanding work, and local result paths. Raw chat remains in the
-  existing JSON archive; summaries are working context, not new durable user facts.
+  Pi journal; summaries are working context, not new durable user facts.
 
 The runtime logs input, cache-hit/miss tokens, output, estimated model cost, first-token
 latency, and request duration. Summary usage is logged separately. Compare total input
@@ -52,6 +54,9 @@ and uncached tokens as well as cache percentage: carrying a huge cached result c
 still cost more than a small, focused request.
 
 ## Evaluation
+
+Current refactor results are recorded in [context-architecture.md](context-architecture.md).
+
 
 Offline tests inspect real DeepSeek payload serialization, stop before network I/O,
 and verify unchanged prefixes across twelve turns, mode changes, and memory updates.
@@ -62,6 +67,8 @@ Real-model scenarios under `tests/scenarios/context/` check an answer beyond the
 preview and a corrected task whose parameters must survive actual summarization.
 The broader conversation suite covers greetings, references, task resumption, restart,
 and authorization. Tests mock external mutations and retain failed reports locally.
+
+### Earlier cache optimization (`ab1a282`, before the session refactor)
 
 A synthetic twelve-turn comparison uses the same model, one read-only report query,
 a mode change, and a memory update. It compares the previous context assembly/raw CLI
@@ -83,14 +90,14 @@ best effort; latency is one run's observation, not a statistical performance gua
 
 An initial attempt to shorten turn guidance to a mode label hurt greeting behavior.
 A small prompt-layout comparison scored 2/10 with the label, 9/10 with full guidance
-before the current message, and 10/10 with full guidance after it. The implementation
-keeps full guidance at the tail for continuity, but subsequent conversation tests
+before the current message, and 10/10 with full guidance after it. That version
+kept full guidance at the tail for continuity, but subsequent conversation tests
 still observed extra greeting questions. Greetings therefore retain their original
 system-level guidance at their already-isolated boundary. The previous commit also
 reproduced extra greeting questions. No output clipping, silent retries, or relaxed
 assertions conceal model behavior. The persona prompt itself is unchanged.
 
-Final validation on 2026-09-22:
+Validation of that earlier version on 2026-09-22:
 
 - `pnpm test`: 38/38 offline checks passed, including actual provider payload prefixes.
 - The full real-model suite ran 92 checks: 87 passed; five greeting/thanks wording

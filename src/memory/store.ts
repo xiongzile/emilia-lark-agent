@@ -1,8 +1,8 @@
 import {randomUUID} from "node:crypto";
 import {mkdir, readFile, rename, writeFile} from "node:fs/promises";
 import {join, resolve} from "node:path";
-import type {ConversationState} from "../agent/conversation.ts";
-import {formatAgentTime} from "../time.ts";
+import {ConversationJournal} from "../agent/journal.ts";
+import {ContextTree} from "../agent/context-tree.ts";
 
 export const memoryCategories = ["profile", "preference", "project", "decision", "progress", "open_issue"] as const;
 export type MemoryCategory = typeof memoryCategories[number];
@@ -27,7 +27,6 @@ export interface Turn {
 interface TranscriptFile {
     version: 1;
     turns: Turn[];
-    conversation?: ConversationState;
 }
 
 interface MemoryFile {
@@ -66,33 +65,45 @@ export class MemoryStore {
     private readonly directory: string;
     private readonly transcript: TranscriptFile;
     private readonly memories: MemoryFile;
+    readonly history: ConversationJournal;
+    readonly tree: ContextTree;
 
     private constructor(
         directory: string,
         transcript: TranscriptFile,
         memories: MemoryFile,
+        history: ConversationJournal,
+        tree: ContextTree,
     ) {
         this.directory = directory;
         this.transcript = transcript;
         this.memories = memories;
+        this.history = history;
+        this.tree = tree;
     }
 
     static async open(directory = resolve(process.cwd(), ".private/memory")): Promise<MemoryStore> {
         await mkdir(directory, {recursive: true, mode: 0o700});
-        const [transcript, memories] = await Promise.all([
-            loadJson<TranscriptFile>(join(directory, "transcript.json"), {version: 1, turns: []}),
-            loadJson<MemoryFile>(join(directory, "memories.json"), {version: 1, processedCount: 0, entries: []}),
-        ]);
-        if (transcript.version !== 1 || !Array.isArray(transcript.turns) ||
-            memories.version !== 1 || !Array.isArray(memories.entries) ||
-            !Number.isInteger(memories.processedCount) || memories.processedCount < 0 ||
-            memories.processedCount > transcript.turns.length) {
+        const memories = await loadJson<MemoryFile>(join(directory, "memories.json"), {version: 1, processedCount: 0, entries: []});
+        if (memories.version !== 1 || !Array.isArray(memories.entries) ||
+            !Number.isInteger(memories.processedCount) || memories.processedCount < 0) {
             throw new Error("Invalid memory JSON format");
         }
-        return new MemoryStore(directory, transcript, memories);
+        const history = await ConversationJournal.open(directory, async () => {
+            const transcript = await loadJson<TranscriptFile>(join(directory, "transcript.json"), {version: 1, turns: []});
+            if (transcript.version !== 1 || !Array.isArray(transcript.turns)) throw new Error("Invalid transcript JSON format");
+            return transcript.turns;
+        });
+        if (memories.processedCount > history.turns.length) {
+            await history.close();
+            throw new Error("Memory cursor exceeds conversation history");
+        }
+        try {
+            return new MemoryStore(directory, {version: 1, turns: history.turns}, memories, history, await ContextTree.open(history, directory));
+        } catch (error) {await history.close(); throw error;}
     }
 
-    private persist(file: "transcript.json" | "memories.json", value: unknown): Promise<void> {
+    private persist(file: "memories.json", value: unknown): Promise<void> {
         const snapshot = structuredClone(value);
         this.saving = this.saving.catch(() => undefined)
             .then(() => saveJson(join(this.directory, file), snapshot));
@@ -101,20 +112,13 @@ export class MemoryStore {
 
     async recordUser(messageId: string, user: string): Promise<void> {
         if (this.transcript.turns.some((turn) => turn.messageId === messageId)) return;
-        this.transcript.turns.push({messageId, at: new Date().toISOString(), user});
-        await this.persist("transcript.json", this.transcript);
+        await this.history.record({kind: "user", turn: {messageId, at: new Date().toISOString(), user}});
     }
 
-    async recordAssistant(messageId: string, assistant: string | undefined, conversation?: ConversationState): Promise<void> {
+    async recordAssistant(messageId: string, assistant: string | undefined): Promise<void> {
         const turn = this.transcript.turns.find((item) => item.messageId === messageId);
         if (!turn) throw new Error(`Unknown transcript message: ${messageId}`);
-        if (assistant === undefined) turn.failed = true;
-        else {
-            turn.assistant = assistant;
-            delete turn.failed;
-            if (conversation) this.transcript.conversation = structuredClone(conversation);
-        }
-        await this.persist("transcript.json", this.transcript);
+        await this.history.record({kind: "reply", messageId, assistant});
     }
 
     status() {
@@ -125,7 +129,7 @@ export class MemoryStore {
         return {
             turns: this.transcript.turns.length,
             pending: this.transcript.turns.slice(this.memories.processedCount)
-                .filter((turn) => turn.assistant !== undefined && !turn.user.startsWith("/memory")).length,
+                .filter((turn) => turn.assistant !== undefined && !/^\/(memory|tree)(?:\s|$)/.test(turn.user.trim())).length,
             lastExtractedAt: this.memories.updatedAt ?? null,
             needsCheck: this.memories.entries.filter((entry) => entry.status === "needs_check").length,
             resolved: this.memories.entries.filter((entry) => entry.status === "resolved").length,
@@ -142,11 +146,7 @@ export class MemoryStore {
         const from = range.from ? turns.findIndex(turn => turn.messageId === range.from) : 0;
         if (from < 0) return [];
         return turns.slice(from).filter(turn => (turn.assistant !== undefined || turn.failed) &&
-            !/^\/memory(?:\s|$)/.test(turn.user.trim())).slice(-limit);
-    }
-
-    conversation(): ConversationState {
-        return structuredClone(this.transcript.conversation ?? {});
+            !/^\/(memory|tree)(?:\s|$)/.test(turn.user.trim())).slice(-limit);
     }
 
     turnsById(ids: string[]): Turn[] {
@@ -158,15 +158,13 @@ export class MemoryStore {
         return this.memories.entries.find((entry) => entry.id === id);
     }
 
-    search(query: string, raw = false): unknown[] {
+    search(query: string): unknown[] {
         const words = [...new Set((query.toLocaleLowerCase().match(/[a-z0-9_]+|[\p{Script=Han}]+/gu) ?? [])
             .flatMap((word) => /[\p{Script=Han}]/u.test(word) && word.length > 2
                 ? Array.from({length: word.length - 1}, (_, index) => word.slice(index, index + 2))
                 : [word]))];
         if (words.length === 0) return [];
-        const candidates = raw
-            ? this.transcript.turns.map((turn) => ({id: turn.messageId, at: formatAgentTime(turn.at), text: `用户：${turn.user}\n爱蜜莉雅：${turn.assistant ?? ""}`}))
-            : this.memories.entries.map((entry) => ({id: entry.id, category: entry.category, status: entry.status, text: entry.text, sourceMessageIds: entry.sourceMessageIds}));
+        const candidates = this.memories.entries.map((entry) => ({id: entry.id, category: entry.category, status: entry.status, text: entry.text, sourceMessageIds: entry.sourceMessageIds}));
         return candidates.map((item) => ({item, score: words.filter((word) => item.text.toLocaleLowerCase().includes(word)).length}))
             .filter(({score}) => score > 0)
             .sort((left, right) => right.score - left.score)
@@ -191,7 +189,7 @@ export class MemoryStore {
         while (through < this.transcript.turns.length && turns.length < limit) {
             const turn = this.transcript.turns[through];
             if (turn.assistant === undefined && !turn.failed) break;
-            if (turn.assistant !== undefined && !turn.user.startsWith("/memory")) turns.push(turn);
+            if (turn.assistant !== undefined && !/^\/(memory|tree)(?:\s|$)/.test(turn.user.trim())) turns.push(turn);
             through += 1;
         }
         return {turns, from, through};

@@ -19,8 +19,10 @@ conversation({
                 review: "mr review <id> --repo <repo> --approve --as user",
                 merge: "mr merge <id> --repo <repo> --as user",
             }}},
+            {args: ["mr", "review", "--help"], result: {usage: "mr review <id> --repo <repo> --approve --as user"}},
             {startsWith: ["mr", "get"], result: {id: 731, repo: "example-org/mobile", state: "open", hasConflicts: true}},
-            {startsWith: ["mr", "review"], result: {id: 731, repo: "example-org/mobile", review: "approved", identity: "user", merged: false}},
+            {args: ["mr", "review", "731", "--repo", "example-org/mobile", "--approve", "--as", "user"],
+                result: {id: 731, repo: "example-org/mobile", review: "approved", identity: "user", merged: false}},
         ],
     })],
     events: [

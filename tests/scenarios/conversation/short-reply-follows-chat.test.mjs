@@ -1,7 +1,7 @@
 import {conversation} from "../../support/agent-fixture.mjs";
 import {mockCommand} from "../../support/chat-simulator.mjs";
 
-// agent/conversation.ts: short references follow the latest topic, not an older unfinished task.
+// agent/tree-router.ts: short references follow the latest topic, not an older unfinished task.
 conversation({
     name: "聊天中说第一个和继续，指向最近的聊天选项而不是旧 MR",
     history: [

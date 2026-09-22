@@ -1,43 +1,32 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {createTurnRouter, contextTurnIds} from "../dist/agent/conversation.js";
+import {createTreeRouter} from "../dist/agent/tree-router.js";
 
-const answer = (mode, history, confidence = 1) => ({answers: {
-    mode: {type: "choice", choice: mode, confidence}, history: {type: "choice", choice: history, confidence},
-}});
-const recent = [{messageId: "jev", user: "你知道 Jev 吗？", assistant: "在哪里看到的？"}];
-
-test("完整问候和感谢免费走规则，带称呼或请求才调用 Jev，一次请求判断两个字段", async () => {
-    const replies = [answer("greet", "new"), answer("task", "new")];
-    let requests = 0;
-    const router = createTurnRouter({apiKey: "fixture-key", request: async (url, options) => {
-        assert.equal(url, "https://api.typesafe.ai/v1/systemone");
-        const body = JSON.parse(options.body);
-        assert.deepEqual(Object.keys(body.questions), ["mode", "history"]);
-        assert.equal(body.state.recentDialogue[0].user, "你知道 Jev 吗？");
-        return Response.json(replies[requests++]);
+const answer = (choice, confidence = 1) => ({answers: {mode: {type: "choice", choice, confidence}, branch: {type: "choice", choice: "current", confidence}}});
+test("树路由读取最近十轮原话，区分回应方式与话题归属", async () => {
+    let body;
+    const router = createTreeRouter({apiKey: "fixture", request: async (_url, options) => {
+        body = JSON.parse(options.body); return Response.json(answer("task"));
     }});
-    assert.deepEqual(contextTurnIds(await router("你好！", {}, recent), {}, recent), []);
-    assert.deepEqual(contextTurnIds(await router("谢谢", {}, recent), {}, recent), ["jev"]);
-    assert.equal(requests, 0);
-    const greeting = await router("晚上好呀爱蜜莉雅", {}, recent);
-    assert.equal(greeting.source, "jev");
-    assert.deepEqual(contextTurnIds(greeting, {}, recent), []);
-    const task = await router("你好，帮我查最新提交", {}, recent);
-    assert.equal(task.mode, "task");
-    assert.deepEqual(contextTurnIds(task, {}, recent), ["jev"]);
-    assert.equal(requests, 2);
+    const turns = Array.from({length: 12}, (_, i) => ({messageId: `t${i}`, user: `问题 ${i}`, assistant: `答复 ${i}`}));
+    turns[2].user = "背景".repeat(700) + "DOC-731";
+    const route = await router("接着刚才那个", {active: "t1"}, turns);
+    assert.deepEqual(Object.keys(body.questions), ["mode", "branch"]);
+    assert.equal(body.state.recentDialogue.length, 10);
+    assert.equal(body.state.recentDialogue[0].user, turns[2].user);
+    assert.equal(route.mode, "task");
+    assert.equal("history" in route, false);
+    const low = await createTreeRouter({apiKey: "fixture", request: async () => Response.json(answer("chat", 0.2))})("第一个", {}, turns);
+    assert.equal(low.mode, "chat");
+    assert.equal(low.source, "jev");
 });
-
-test("Jev 不确定、故障或响应异常时不清除当前追问，也不恢复问候前的旧任务", async t => {
+test("模式服务故障和不确定只降级提示，不抛异常或暴露凭据", async t => {
     const failures = {
-        lowConfidence: async () => Response.json(answer("greet", "new", 0.1)),
-        uncertain: async () => Response.json(answer("uncertain", "uncertain")),
-        inconsistent: async () => Response.json(answer("greet", "recall")),
-        missingAnswer: async () => Response.json({answers: {mode: {type: "choice", choice: "greet", confidence: 1}}}),
-        invalidConfidence: async () => Response.json(answer("greet", "new", 2)),
-        rateLimit: async () => new Response("private details", {status: 429}),
-        denied: async () => new Response("private details", {status: 401}),
+        uncertain: async () => Response.json(answer("uncertain")),
+        missing: async () => Response.json({}),
+        invalid: async () => Response.json(answer("greet", 2)),
+        denied: async () => new Response("private provider details", {status: 401}),
+        rateLimit: async () => new Response("private provider details", {status: 429}),
         malformed: async () => new Response("not JSON"),
         network: async () => {throw new Error("private provider details");},
         timeout: async (_url, {signal}) => new Promise((_resolve, reject) => {
@@ -45,65 +34,13 @@ test("Jev 不确定、故障或响应异常时不清除当前追问，也不恢�
             signal.addEventListener("abort", () => {clearTimeout(timer); reject(signal.reason);}, {once: true});
         }),
     };
-    const taskContext = {name: "创建 MR", messageIds: ["original-request"]};
     for (const [name, request] of Object.entries(failures)) await t.test(name, async () => {
-        const fallback = await createTurnRouter({apiKey: "fixture-key", request, timeoutMs: 15})("上网搜搜看", {}, recent);
-        assert.equal(fallback.source, "fallback");
-        assert.deepEqual(contextTurnIds(fallback, {taskContext}, recent), ["jev", "original-request"]);
-        assert.deepEqual(contextTurnIds(fallback, {taskContext, segmentStart: "hello"}, []), []);
-        assert.doesNotMatch(JSON.stringify(fallback), /private details|private provider|fixture-key/);
+        const route = await createTreeRouter({apiKey: "fixture-key", request, timeoutMs: 15})("继续", {}, []);
+        assert.equal(route.source, "fallback");
+        assert.equal(route.branch, "current");
+        assert.doesNotMatch(JSON.stringify(route), /private provider|fixture-key/);
     });
-});
-
-test("缺少密钥和超长消息不会发送请求或清空已有上下文", async () => {
-    const request = async () => {throw new Error("must not call provider");};
-    const missing = await createTurnRouter({apiKey: "", request})("去搜一下", {}, recent);
-    const long = await createTurnRouter({apiKey: "fixture-key", request})("查".repeat(8001), {}, recent);
-    assert.equal(missing.reason, "not_configured");
-    assert.equal(long.reason, "long_message");
-    assert.deepEqual(contextTurnIds(long, {}, recent), ["jev"]);
-});
-
-test("分类器收到完整的最近十轮和分界标记，不截掉句末的指代线索", async () => {
-    let sent;
-    const router = createTurnRouter({apiKey: "fixture-key", request: async (_url, options) => {
-        sent = JSON.parse(options.body).state.recentDialogue;
-        return Response.json(answer("task", "recall"));
-    }});
-    const turns = Array.from({length: 12}, (_, i) => ({messageId: `r${i}`, user: `消息 ${i}`, assistant: `答复 ${i}`}));
-    turns[2].user = "背景".repeat(700) + "任务对象 DOC-TAIL-731";
-    turns[2].assistant = "解释".repeat(900) + "等确认后执行";
-    await router("继续刚才的任务", {segmentStart: "r9"}, turns);
-    assert.equal(sent.length, 10);
-    assert.equal(sent[0].user, turns[2].user);
-    assert.equal(sent[0].assistant, turns[2].assistant);
-    assert.deepEqual(sent.map(turn => turn.segment), [...Array(7).fill("earlier"), ...Array(3).fill("current")]);
-});
-
-test("只发送当前段的线索，新话题用原话作名称，续聊不被短句覆盖", async () => {
-    const requests = [];
-    const router = createTurnRouter({apiKey: "fixture-key", request: async (_url, options) => {
-        requests.push(JSON.parse(options.body));
-        return Response.json(answer("chat", "current"));
-    }});
-    const state = {segmentStart: "hello", taskContext: {name: "删除文档 DOC-OLD", messageIds: ["old"]},
-        currentTopic: {name: "Jev 的架构", messageIds: ["new"], segmentStart: "hello"}};
-    const result = await router("然后呢", state, []);
-    assert.doesNotMatch(JSON.stringify(requests), /DOC-OLD|删除文档/);
-    assert.equal(result.topic, "Jev 的架构");
-    const fresh = await router("来聊聊 C++ 内存模型", {segmentStart: "hello"}, []);
-    assert.equal(fresh.topic, "来聊聊 C++ 内存模型");
-});
-
-
-test("chat 和 task 分不清时，仍保留明确的历史回顾请求", async () => {
-    const data = answer("task", "recall");
-    data.answers.mode.confidence = 0.44;
-    data.answers.history.confidence = 0.52;
-    const router = createTurnRouter({apiKey: "fixture-key", request: async () => Response.json(data)});
-    const result = await router("刚才我们在处理哪个任务？", {segmentStart: "hello"}, []);
-    assert.equal(result.mode, "chat");
-    assert.equal(result.history, "recall");
-    assert.equal(result.reason, "uncertain_mode");
-    assert.deepEqual(contextTurnIds(result, {segmentStart: "hello"}, [{messageId: "hello"}], [{messageId: "old-task"}]), ["hello", "old-task"]);
+    const request = () => assert.fail("must not send");
+    assert.equal((await createTreeRouter({apiKey: "", request})("查询", {}, [])).reason, "not_configured");
+    assert.equal((await createTreeRouter({apiKey: "fixture", request})("字".repeat(8001), {}, [])).reason, "long_message");
 });

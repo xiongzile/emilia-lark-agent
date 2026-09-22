@@ -1,4 +1,4 @@
-import {createTurnRouter} from "./conversation.ts";
+import {createTreeRouter} from "./tree-router.ts";
 import {Agent, type AgentTool} from "@earendil-works/pi-agent-core";
 import {createModels} from "@earendil-works/pi-ai";
 import {deepseekProvider} from "@earendil-works/pi-ai/providers/deepseek";
@@ -13,6 +13,7 @@ import {MemoryDistiller} from "../memory/distill.ts";
 import {type MemoryStore} from "../memory/store.ts";
 import {createMemoryTool} from "../memory/tool.ts";
 import {createContextCompactor, summaryInstruction} from "./context.ts";
+import {createContextTreeTool} from "./tree-tools.ts";
 
 export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[],
     contextBudget = {maxTokens: 64000, keepTokens: 16000}) {
@@ -27,7 +28,7 @@ export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[],
         throw new Error(`Unknown DeepSeek model '${modelId}'. Available models: ${available}`);
     }
 
-    const availableTools = tools ?? (() => {
+    const availableTools = [createContextTreeTool(memory), ...(tools ?? (() => {
         const webSearchTool = createWebSearchTool();
         return [
             createMemoryTool(memory),
@@ -37,7 +38,7 @@ export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[],
             ...(webSearchTool ? [webSearchTool] : []),
             ...createConfiguredCliTools(localAgentConfig.commandTools ?? []),
         ];
-    })();
+    })())];
     const systemPrompt = [emiliaSystemPrompt, localAgentConfig.prompt]
         .filter(Boolean)
         .join("\n\n");
@@ -70,12 +71,6 @@ export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[],
         if (response.stopReason !== "stop") throw new Error(`Summary failed: ${response.stopReason}`);
         return response.content.filter(part => part.type === "text").map(part => part.text).join("");
     }, {...contextBudget, maxTokens: Math.min(contextBudget.maxTokens, model.contextWindow - 8192)});
-    agent.prepareNextTurnWithContext = async ({context}, signal) => {
-        const messages = await compact(context.messages, signal);
-        if (messages === context.messages) return;
-        agent.state.messages = messages;
-        return {context: {...context, messages}};
-    };
 
     agent.subscribe((event) => {
         if (event.type === "message_update" && firstTokenMs === undefined &&
@@ -130,5 +125,5 @@ export function createDeepSeekAgent(memory: MemoryStore, tools?: AgentTool[],
         }
     });
 
-    return {agent, compact, distiller: new MemoryDistiller(memory, models, model), router: createTurnRouter()};
+    return {agent, compact, distiller: new MemoryDistiller(memory, models, model), router: createTreeRouter()};
 }

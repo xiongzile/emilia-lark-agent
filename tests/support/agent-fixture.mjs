@@ -95,10 +95,11 @@ export function conversation(script) {
             if (previousConfig === undefined) delete process.env.AGENT_LOCAL_CONFIG;
             else process.env.AGENT_LOCAL_CONFIG = previousConfig;
             await rm(fixture, {recursive: true, force: true});
-            const outputDirectory = join(projectRoot, ".private/test-runs");
+            const outputDirectory = process.env.AGENT_EVAL_DIRECTORY || join(projectRoot, ".private/test-runs");
             await mkdir(outputDirectory, {recursive: true, mode: 0o700});
             const outputPath = join(outputDirectory, `agent-eval-${Date.now()}-${process.pid}.json`);
             await writeFile(outputPath, JSON.stringify({
+                batch: process.env.AGENT_EVAL_BATCH, round: Number(process.env.AGENT_EVAL_ROUND ?? 1),
                 model: process.env.DEEPSEEK_MODEL || "deepseek-flash", results: [result],
             }, null, 2) + "\n", {mode: 0o600});
             console.log(`Conversation report: ${outputPath}`);

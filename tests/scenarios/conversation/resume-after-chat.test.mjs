@@ -1,7 +1,7 @@
 import {conversation} from "../../support/agent-fixture.mjs";
 import {mockCommand} from "../../support/chat-simulator.mjs";
 
-// memory/store.ts + agent/conversation.ts: durable task references survive chat and a restart.
+// memory/store.ts + agent/context-tree.ts: durable task references survive chat and a restart.
 conversation({
     name: "暂停任务去聊天，近期窗口过期和重启后仍能补齐参数执行",
     tools: [mockCommand({name: "task_cli", description: "Create MR: args [create, target branch, title]. Requires both branch and title.",

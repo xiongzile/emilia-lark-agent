@@ -6,6 +6,7 @@ import {test} from "node:test";
 import {MemoryStore} from "../dist/memory/store.js";
 import {MemoryDistiller} from "../dist/memory/distill.js";
 import {restoreTurn} from "../dist/agent/history.js";
+import {createContextTreeTool} from "../dist/agent/tree-tools.js";
 import {AgentSession} from "../dist/agent/session.js";
 
 test("raw turns survive restart and only distilled facts enter core memory", async () => {
@@ -35,12 +36,12 @@ test("raw turns survive restart and only distilled facts enter core memory", asy
         assert.match(store.context("stable"), /pi 指用户的 agent 工程/);
         assert.doesNotMatch(store.context("stable"), /记住：pi 是我的 agent 工程/);
 
+        await store.history.close();
         const reopened = await MemoryStore.open(directory);
         assert.equal(reopened.list("project").length, 1);
         assert.equal(reopened.search("agent 工程").length, 1);
-        assert.equal(reopened.search("记住 pi", true).length, 1);
-        assert.deepEqual(JSON.parse(await readFile(join(directory, "transcript.json"), "utf8")).turns[0].user,
-            "记住：pi 是我的 agent 工程");
+        assert.equal(reopened.history.turns[0].user, "记住：pi 是我的 agent 工程");
+        await reopened.history.close();
     } finally {
         await rm(directory, {recursive: true, force: true});
     }
@@ -59,7 +60,8 @@ test("historical chat times are shown in Beijing time while the archive stays UT
         const store = await MemoryStore.open(directory);
         assert.match(restoreTurn(store.turnsById(["history-1"])[0], {})[0].content,
             /历史消息时间：2026-09-21T18:28:54\+08:00/);
-        assert.equal(store.search("R8", true)[0].at, "2026-09-21T18:28:54+08:00");
+        const result = await createContextTreeTool(store).execute("test", {operation: "recent"});
+        assert.equal(JSON.parse(result.content[0].text).turns[0].at, "2026-09-21T18:28:54+08:00");
 
         const session = new AgentSession(null, store, null);
         const status = await session.run("status-1", "/memory status");
@@ -88,7 +90,7 @@ test("updates correct existing facts and do not duplicate delivery", async () =>
         assert.equal(store.get(id).text, "用户负责 Android 构建");
         assert.equal(await store.forget(id), true);
         assert.equal(store.list().length, 0);
-        assert.equal(store.search("Android", true).length, 2);
+        assert.equal(store.history.turns.length, 2);
     } finally {
         await rm(directory, {recursive: true, force: true});
     }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {mkdtemp, readFile, writeFile} from "node:fs/promises";
 import {join} from "node:path";
 import {Type} from "@earendil-works/pi-ai";
+import {createReplyJudge, scoreTurn} from "./conversation-score.mjs";
 
 export function mockCommand({name, description, rules}) {
     return {
@@ -10,9 +11,11 @@ export function mockCommand({name, description, rules}) {
         description,
         parameters: Type.Object({args: Type.Array(Type.String())}),
         async execute(_id, {args}) {
-            const rule = rules.find(({startsWith}) => startsWith.every((part, index) => args[index] === part));
+            const rule = rules.find(({args: exact, startsWith}) => exact
+                ? JSON.stringify(args) === JSON.stringify(exact)
+                : startsWith.every((part, index) => args[index] === part));
             if (!rule) {
-                const commands = rules.map(({startsWith}) => startsWith.join(" ")).join(", ");
+                const commands = rules.map(rule => (rule.args ?? rule.startsWith).join(" ")).join(", ");
                 throw new Error(`Unknown ${name} command: ${JSON.stringify(args)}. Supported commands: ${commands}`);
             }
             if (rule.error) throw new Error(rule.error);
@@ -88,6 +91,7 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
         let session;
         let distiller;
         let routingUnavailable = routerUnavailable;
+        let forcedRoute;
         const timeline = history.flatMap(({user, assistant, at}) => [
             {type: "user", text: user, at},
             {type: "assistant", text: assistant},
@@ -95,6 +99,8 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
         const calls = [];
         const failures = [];
         let compactions = 0;
+        const judge = process.env.AGENT_EVAL_SCORE === "1" && events.some(event => event.score)
+            ? await createReplyJudge() : undefined;
 
         function recordCompaction(before, after) {
             if (after === before) return;
@@ -107,16 +113,15 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
                 typeof tool === "string" ? toolRegistry[tool](store) : tool
             );
             const runtime = createDeepSeekAgent(store, resolvedTools, contextBudget);
-            const prepareNextTurn = runtime.agent.prepareNextTurnWithContext;
-            runtime.agent.prepareNextTurnWithContext = async (turn, signal) => {
-                const update = await prepareNextTurn(turn, signal);
-                if (update?.context) recordCompaction(turn.context.messages, update.context.messages);
-                return update;
+            // The provider hook sees the serialized request, after context selection
+            // and conversion. Observe only: never change what the model receives.
+            runtime.agent.onPayload = payload => {
+                timeline.push({type: "model_request", payload: structuredClone(payload)});
             };
             distiller = runtime.distiller;
             session = new AgentSession(runtime.agent, store, distiller, async (...args) => {
                 if (routingUnavailable) throw new Error("simulated router outage");
-                const route = await runtime.router(...args);
+                const route = forcedRoute ?? await runtime.router(...args);
                 timeline.push({type: "route", ...route});
                 return route;
             }, async (messages, signal) => {
@@ -146,10 +151,17 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
                 const compactionsBefore = compactions;
                 let reply = "";
                 if (event.user !== undefined) {
+                    forcedRoute = event.route;
+                    const turnStart = timeline.length;
                     timeline.push({type: "user", text: event.user});
-                    reply = await session.run(event.id ?? `turn-${index + 1}`, event.user);
+                    let failure;
+                    try {reply = await session.run(event.id ?? `turn-${index + 1}`, event.user);}
+                    catch (error) {failure = error;}
                     timeline.push({type: "assistant", text: reply});
-                    timeline.push({type: "conversation_state", ...store.conversation()});
+                    timeline.push({type: "conversation_state", active: store.tree.active, topics: store.tree.list()});
+                    if (judge && event.score) timeline.push(await scoreTurn(event.score,
+                        {user: event.user, reply, timeline: timeline.slice(turnStart)}, judge));
+                    if (failure) throw failure;
                 } else if (event.routerUnavailable !== undefined) {
                     routingUnavailable = event.routerUnavailable;
                     timeline.push({type: "router_availability", unavailable: routingUnavailable});
@@ -158,6 +170,7 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
                     timeline.push({type: "distill", changes});
                 } else if (event.restart) {
                     await distiller.stop();
+                    await store.history.close();
                     store = await MemoryStore.open(directory);
                     start();
                     timeline.push({type: "restart"});
@@ -188,6 +201,7 @@ export function createChatSimulator({fixture, workspaces, MemoryStore, createDee
             throw error;
         } finally {
             await distiller.stop();
+            await store.history.close();
         }
         return timeline;
     };

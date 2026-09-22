@@ -20,7 +20,14 @@ conversation({
             calls: [{tool: "document_cli", args: ["rename", "DOC-NEW-921", "秋季周报"], count: 1}, {tool: "document_cli", count: 1}],
             noCalls: [{tool: "document_cli", startsWith: ["publish"]}],
         }},
-        {user: "它现在叫什么？只回答标题。", expect: {reply: /秋季周报/, noCalls: [{tool: "document_cli"}]}},
+        {user: "它现在叫什么？只回答标题。", score: {
+            reply: "刚才已将 DOC-NEW-921 改名为秋季周报，现在只需回答秋季周报，不重复修改、不要求用户再说编号。",
+            context: [
+                {label: "本轮问题", contains: "它现在叫什么", role: "user"},
+                {label: "最新标题", contains: "秋季周报", critical: true},
+                {label: "改名工具结果", contains: ["DOC-NEW-921", "updated"], role: "tool", critical: true},
+            ],
+        }, expect: {reply: /秋季周报/, noCalls: [{tool: "document_cli"}]}},
         {user: "晚上好", expect: {reply: /晚上好/, notReply: /DOC-|秋季周报|附件|改名/, noCalls: [{tool: "document_cli"}]}},
     ],
 });

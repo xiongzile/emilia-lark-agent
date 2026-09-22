@@ -3,159 +3,87 @@ import {mkdtemp, rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {test} from "node:test";
+import {Type} from "@earendil-works/pi-ai";
 import {AgentSession} from "../dist/agent/session.js";
 import {MemoryStore} from "../dist/memory/store.js";
-import {uncertainTurn, advanceConversation} from "../dist/agent/conversation.js";
+import {createContextTreeTool} from "../dist/agent/tree-tools.js";
+import {scriptedAgent} from "./support/scripted-agent.mjs";
 
-// Session orchestration: preserve actual tool evidence, not an invented summary.
-test("查看记忆状态、暂停和重启不丢任务来源，存活会话保留完整工具结果", async () => {
+const hint = mode => ({mode, source: "jev", elapsedMs: 0});
+test("查询证据经历问候、记忆指令和重启后仍可读取，恢复不重复工具操作", async () => {
     const directory = await mkdtemp(join(tmpdir(), "emilia-session-"));
+    let store;
     try {
-        let store = await MemoryStore.open(directory);
-        const requests = [];
-        const agent = {
-            state: {model: {api: "test", provider: "test", id: "test"}, messages: [{role: "system", content: "persona", toolsAdded: [{name: "lookup"}]}]},
-            async prompt(message) {
-                requests.push(structuredClone(this.state.messages));
-                this.state.messages.push(message);
-                if (message.content.some(part => part.text?.startsWith("用户当前消息：\n查文档"))) this.state.messages.push(
-                    {role: "assistant", content: [{type: "toolCall", id: "call-1", name: "lookup", arguments: {}}]},
-                    {role: "toolResult", toolCallId: "call-1", toolName: "lookup", content: [{type: "text", text: "DOC-731"}]},
-                );
-                this.state.messages.push({role: "assistant", content: [{type: "text", text: "答复"}]});
-            },
-        };
-        const router = async text => text === "你好"
-            ? {...uncertainTurn(), source: "rule", mode: "greet", history: "new"}
-            : {...uncertainTurn(), source: "jev", mode: "task", topic: "文档", history: text === "查文档" ? "new" : "recall"};
-        let session = new AgentSession(agent, store, {schedule() {}}, router);
+        store = await MemoryStore.open(directory);
+        let lookups = 0;
+        const lookup = {name: "lookup", label: "lookup", description: "Query a document", parameters: Type.Object({}),
+            async execute() {lookups++; return {content: [{type: "text", text: "DOC-731 revision=17"}]};}};
+        const {agent, requests} = scriptedAgent((_ctx, i) => i === 1
+            ? {content: [{type: "toolCall", id: "call-1", name: "lookup", arguments: {}}]} : "答复", [lookup]);
+        let selected = hint("task");
+        let session = new AgentSession(agent, store, {schedule() {}}, async () => selected);
         await session.run("work", "查文档");
         await session.run("memory-status", "/memory status");
-        assert.equal(requests.length, 1, "查看记忆状态不调用模型，也不应丢弃刚查到的工具结果");
-        await session.run("hello", "你好");
-        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /DOC-731|查文档/);
-        for (let i = 0; i < 8; i++) {await store.recordUser(`chat-${i}`, "闲聊"); await store.recordAssistant(`chat-${i}`, "好呀");}
-        await session.run("resume", "继续文档");
-        assert.equal(requests.at(-1).filter(m => m.role === "toolResult").length, 1);
-        assert.equal(requests.at(-1).find(m => m.role === "toolResult").toolCallId, "call-1");
-        assert.deepEqual(requests.at(-1)[0].toolsAdded, [{name: "lookup"}]);
-        const beforeRestart = store.conversation();
-        store = await MemoryStore.open(directory);
-        assert.deepEqual(store.conversation(), beforeRestart);
-        session = new AgentSession(agent, store, {schedule() {}}, router);
-        await session.run("restart", "继续文档");
-        assert.match(JSON.stringify(requests.at(-1)), /查文档/);
-        assert.match(JSON.stringify(requests.at(-1)), /历史助手回复.*未核验/);
-        assert.equal(requests.at(-1).some(m => m.role === "toolResult"), false);
-    } finally {await rm(directory, {recursive: true, force: true});}
+        assert.equal(requests.length, 2);
+        selected = hint("greet");
+        await session.run("hello", "下午好");
+        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /DOC-731|revision=17/);
+        const read = await createContextTreeTool(store).execute("read", {operation: "read", id: "work"});
+        assert.match(JSON.stringify(read), /revision=17/);
+        await store.history.close(); store = await MemoryStore.open(directory);
+        session = new AgentSession(agent, store, {schedule() {}}, async () => {throw new Error("router outage");});
+        await session.run("follow", "接着刚才的文档");
+        assert.match(JSON.stringify(requests.at(-1)), /DOC-731 revision=17/);
+        assert.equal(requests.at(-1).messages.filter(m => m.role === "toolResult").length, 1);
+        assert.equal(lookups, 1);
+    } finally {await store?.history.close(); await rm(directory, {recursive: true, force: true});}
 });
 
-test("新闲聊持久隔离旧任务和项目记忆，多次换话题及重启后仍可恢复原任务", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "emilia-new-topic-"));
-    const route = (mode, history) => ({...uncertainTurn(), source: "jev", mode, history, topic: "当前话题"});
+test("工具执行后模型中断，重启保留实际结果而不恢复半截答复", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "emilia-interrupted-"));
+    let store;
     try {
-        let store = await MemoryStore.open(directory);
-        await store.recordUser("work", "准备修改 DOC-731，标题改为周报，等待确认。");
-        await store.recordAssistant("work", "等待确认。", advanceConversation({}, route("task", "new"), "work"));
-        await store.apply([{operation: "upsert", category: "project", text: "工作文档 DOC-731", sourceMessageIds: ["work"]}], 1);
-        const requests = [];
-        const agent = {
-            state: {model: {api: "test", provider: "test", id: "test"}, messages: [{role: "system", content: "persona"}]},
-            async prompt(message) {
-                requests.push(structuredClone(this.state.messages));
-                this.state.messages.push(message, {role: "assistant", content: [{type: "text", text: "好呀"}]});
-            },
-        };
-        let selected = route("chat", "new");
-        let session = new AgentSession(agent, store, {schedule() {}}, async () => selected);
-        await session.run("rest", "忙了一天，终于能躺会儿了");
-        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /DOC-731|等待确认/);
-        assert.equal(store.conversation().segmentStart, "rest");
-        assert.equal(store.conversation().currentTopic.segmentStart, "rest");
-        assert.deepEqual(store.conversation().taskContext.messageIds, ["work"]);
-        selected = route("chat", "current");
-        await session.run("follow", "就是想随便聊聊");
-        assert.match(JSON.stringify(requests.at(-1)), /终于能躺/);
-        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /DOC-731|等待确认/);
-        selected = route("chat", "new");
-        await session.run("science", "为什么天空是蓝色的？");
-        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /DOC-731|终于能躺/);
-        for (let i = 0; i < 8; i++) {await store.recordUser(`chat-${i}`, "闲聊"); await store.recordAssistant(`chat-${i}`, "好呀");}
         store = await MemoryStore.open(directory);
-        selected = uncertainTurn();
-        session = new AgentSession(agent, store, {schedule() {}}, async () => selected);
-        await session.run("outage", "然后呢");
-        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /DOC-731|等待确认/);
-        selected = route("task", "recall");
-        await session.run("resume", "继续刚才的任务，执行吧");
-        assert.match(JSON.stringify(requests.at(-1)), /准备修改 DOC-731，标题改为周报/);
-        assert.equal(store.conversation().taskContext.segmentStart, "science");
-        selected = route("task", "current");
-        await session.run("pronoun", "它现在叫什么？");
-        assert.match(JSON.stringify(requests.at(-1)), /DOC-731/);
-    } finally {await rm(directory, {recursive: true, force: true});}
+        let mutations = 0;
+        const tool = {name: "rename", label: "rename", description: "Rename", parameters: Type.Object({}),
+            async execute() {mutations++; return {content: [{type: "text", text: "DOC-NEW renamed revision=18"}]};}};
+        const {agent} = scriptedAgent((_ctx, i) => i === 1 ? {content: [{type: "toolCall", id: "rename-1", name: "rename", arguments: {}}]}
+            : {stopReason: "error", errorMessage: "interrupted", content: [{type: "text", text: "BROKEN-PARTIAL"}]}, [tool]);
+        await assert.rejects(new AgentSession(agent, store, {schedule() {}}).run("failed", "重命名 DOC-NEW"));
+        await store.history.close(); store = await MemoryStore.open(directory);
+        const restored = scriptedAgent();
+        await new AgentSession(restored.agent, store, {schedule() {}}).run("retry", "看看刚才做到哪了");
+        const request = JSON.stringify(restored.requests[0]);
+        assert.match(request, /DOC-NEW renamed revision=18/);
+        assert.doesNotMatch(request, /BROKEN-PARTIAL/);
+        assert.equal(mutations, 1);
+    } finally {await store?.history.close(); await rm(directory, {recursive: true, force: true});}
 });
 
-test("生成中断和路由故障后再试，保留新对象而不复用半截回复", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "emilia-recovery-"));
+test("进程未记录最终回复就退出，重启标记未完成但不重做已记录的操作", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "emilia-process-exit-"));
+    let store;
     try {
-        const store = await MemoryStore.open(directory);
-        await store.recordUser("before", "旧对象 DOC-OLD-482");
-        await store.recordAssistant("before", "收到");
-        let attempt = 0;
-        const agent = {
-            state: {model: {api: "test", provider: "test", id: "test"}, messages: [{role: "system", content: "persona"}]},
-            async prompt(message) {
-                if (++attempt === 1) {
-                    this.state.messages.push(message, {role: "assistant", content: [{type: "text", text: "BROKEN-PARTIAL"}]});
-                    throw new Error("generation interrupted");
-                }
-                assert.match(JSON.stringify(this.state.messages), /DOC-NEW-921/);
-                assert.match(JSON.stringify(this.state.messages), /结果未知/);
-                assert.doesNotMatch(JSON.stringify(this.state.messages), /BROKEN-PARTIAL/);
-                this.state.messages.push(message, {role: "assistant", content: [{type: "text", text: "恢复完成"}]});
-            },
-        };
-        const session = new AgentSession(agent, store, {schedule() {}}, async () => {throw new Error("router unavailable");});
-        await assert.rejects(session.run("failed", "改查新文档 DOC-NEW-921"), /generation interrupted/);
-        assert.equal(await session.run("retry", "再试一下"), "恢复完成");
-        assert.ok(store.recentTurns().find(t => t.messageId === "failed").failed);
-    } finally {await rm(directory, {recursive: true, force: true});}
-});
-
-// The reset is durable and also applies to memory injection, not just one greeting.
-test("带称呼的问候建立持久边界，重启和路由故障都不会把旧事带回闲聊", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "emilia-greeting-"));
-    try {
-        let store = await MemoryStore.open(directory);
-        await store.recordUser("old", "昨天讨论 Jev，并取消 DEMO-482 的 35 条认领。");
-        await store.recordAssistant("old", "处理完成。");
-        await store.apply([{operation: "upsert", category: "project", text: "Jev 项目 DEMO-482", sourceMessageIds: ["old"]}], 1);
-        assert.match(store.context("stable"), /Jev 项目 DEMO-482/);
-        const requests = [];
-        const agent = {
-            state: {model: {api: "test", provider: "test", id: "test"}, messages: [{role: "system", content: "persona"}]},
-            async prompt(message) {
-                requests.push(structuredClone(this.state.messages));
-                this.state.messages.push(message, {role: "assistant", content: [{type: "text", text: "好呀"}]});
-            },
-        };
-        let session = new AgentSession(agent, store, {schedule() {}}, async () => ({
-            ...uncertainTurn(), source: "jev", mode: "greet", history: "new",
-        }));
-        await session.run("hello", "晚上好呀爱蜜莉雅");
-        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /Jev|DEMO-482|35 条认领/);
         store = await MemoryStore.open(directory);
-        assert.equal(store.conversation().segmentStart, "hello");
-        session = new AgentSession(agent, store, {schedule() {}}, async () => {throw new Error("router unavailable");});
-        await session.run("day", "今天过得怎么样");
-        assert.match(JSON.stringify(requests.at(-1)), /晚上好呀爱蜜莉雅/);
-        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /Jev|DEMO-482|35 条认领/);
-        assert.equal(store.turnsById(["old"]).length, 1);
-        session = new AgentSession(agent, store, {schedule() {}}, async () => ({
-            ...uncertainTurn(), source: "jev", mode: "chat", history: "recall", topic: "Jev",
-        }));
-        await session.run("recall", "昨天那个 Jev，我们说到哪了？");
-        assert.match(JSON.stringify(requests.at(-1)), /Jev/);
-    } finally {await rm(directory, {recursive: true, force: true});}
+        let writes = 0;
+        const tool = {name: "write", label: "write", description: "Write once", parameters: Type.Object({}),
+            async execute() {writes++; return {content: [{type: "text", text: "DOC-731 revision=42"}]};}};
+        const first = scriptedAgent((_ctx, i) => i === 1
+            ? {content: [{type: "toolCall", id: "write-1", name: "write", arguments: {}}]} : "写好了", [tool]);
+        await store.recordUser("interrupted", "写 DOC-731");
+        const unsubscribe = first.agent.subscribe(event => {
+            if (event.type === "message_end") void store.history.appendMessage(event.message);
+        });
+        await first.agent.prompt("写 DOC-731");
+        unsubscribe();
+        // No recordAssistant: the process disappeared before committing its final reply.
+        await store.history.close(); store = await MemoryStore.open(directory);
+        assert.equal(store.history.turns[0].failed, true);
+        const restarted = scriptedAgent();
+        await new AgentSession(restarted.agent, store, {schedule() {}}).run("after", "刚才做到哪里？");
+        const context = JSON.stringify(restarted.requests[0]);
+        assert.match(context, /DOC-731 revision=42/);
+        assert.match(context, /上一轮中断/);
+        assert.equal(writes, 1);
+    } finally {await store?.history.close(); await rm(directory, {recursive: true, force: true});}
 });
