@@ -36,6 +36,7 @@ results, and assertion failures. Reports and credentials stay local.
 | `scenarios/memory/correct-project` | A corrected project mapping survives both restart and expiry of recent dialogue, then directs a real Git read. |
 | `scenarios/memory/unverified-progress` | The distiller does not treat an assistant's unsupported success claim as verified progress. |
 | `scenarios/task-execution/` | `src/prompts/emilia.ts`: act on a confirmed request, respect the requested identity, report permission denial, and clarify missing information. External CLI responses are simulated. |
+| `task-execution/approval-capability`, `approve-after-refusal`, `review-without-approval`, `approval-permission-denied` | Check CLI capabilities before claiming a restriction; execute an authorized approval despite an earlier refusal; distinguish review, approval and merge; stop on a real permission denial. Assert the target, identity and mutation count. |
 | `scenarios/workspace/correct-file-target` | User correction redirects `workspace_files`; assertions inspect both repositories' actual files. |
 | `scenarios/workspace/find-source-symbol` | The model calls `configured-cli` and the real C++ search binary to locate a source definition. |
 | `jev-router.test.mjs` | Offline provider errors, rate limits, timeout, malformed or uncertain answers, independent decisions and request boundaries. |

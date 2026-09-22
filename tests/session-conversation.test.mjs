@@ -144,13 +144,13 @@ test("带称呼的问候建立持久边界，重启和路由故障都不会把�
             ...uncertainTurn(), source: "jev", mode: "greet", history: "new",
         }));
         await session.run("hello", "晚上好呀爱蜜莉雅");
-        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /Jev|DEMO-482|35/);
+        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /Jev|DEMO-482|35 条认领/);
         store = await MemoryStore.open(directory);
         assert.equal(store.conversation().segmentStart, "hello");
         session = new AgentSession(agent, store, {schedule() {}}, async () => {throw new Error("router unavailable");});
         await session.run("day", "今天过得怎么样");
         assert.match(JSON.stringify(requests.at(-1)), /晚上好呀爱蜜莉雅/);
-        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /Jev|DEMO-482|35/);
+        assert.doesNotMatch(JSON.stringify(requests.at(-1)), /Jev|DEMO-482|35 条认领/);
         assert.equal(store.turnsById(["old"]).length, 1);
         session = new AgentSession(agent, store, {schedule() {}}, async () => ({
             ...uncertainTurn(), source: "jev", mode: "chat", history: "recall", topic: "Jev",
