@@ -22,7 +22,7 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "link:vendor/pi/packages/agent",
     "@earendil-works/pi-ai": "link:vendor/pi/packages/ai",
-    "@larksuiteoapi/node-sdk": "^1.74.0"
+    "@larksuiteoapi/node-sdk": "^1.76.0"
   },
   "devDependencies": {
     "typescript": "^5.5.3"
